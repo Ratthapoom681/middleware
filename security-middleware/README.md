@@ -100,6 +100,129 @@ docker-compose logs -f middleware
 docker-compose run middleware --once
 ```
 
+### 5. Quick Start — Amazon Linux (EC2)
+
+Step-by-step deployment on **Amazon Linux 2023** or **Amazon Linux 2** running on EC2.
+
+#### Prerequisites
+
+```bash
+# Amazon Linux 2023
+sudo dnf update -y
+sudo dnf install -y python3.11 python3.11-pip git sqlite
+
+# Amazon Linux 2 (if python3.11 is not in the default repo)
+sudo yum update -y
+sudo amazon-linux-extras install python3.8 -y
+sudo yum install -y git sqlite
+```
+
+#### Clone & Setup
+
+```bash
+# Clone the repository
+cd /opt
+sudo git clone https://github.com/Ratthapoom681/middleware.git security-middleware
+sudo chown -R ec2-user:ec2-user security-middleware
+cd security-middleware
+
+# Create a virtual environment
+python3 -m venv venv
+source venv/bin/activate
+
+# Install dependencies
+pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+#### Configure (environment variables recommended on EC2)
+
+```bash
+# Create an env file for secrets
+sudo mkdir -p /etc/security-middleware
+sudo tee /etc/security-middleware/env > /dev/null <<EOF
+WAZUH_BASE_URL=https://your-wazuh-manager:55000
+WAZUH_USERNAME=api-user
+WAZUH_PASSWORD=your-password
+DEFECTDOJO_BASE_URL=https://your-defectdojo/api/v2
+DEFECTDOJO_API_KEY=Token your-api-key
+REDMINE_BASE_URL=https://your-redmine
+REDMINE_API_KEY=your-redmine-api-key
+EOF
+
+# Lock down permissions
+sudo chmod 600 /etc/security-middleware/env
+sudo chown ec2-user:ec2-user /etc/security-middleware/env
+```
+
+#### Test the connection
+
+```bash
+cd /opt/security-middleware
+source venv/bin/activate
+set -a; source /etc/security-middleware/env; set +a
+
+# Verify connectivity to Wazuh, DefectDojo, Redmine
+python -m src.main --test
+
+# Run a single cycle to confirm the pipeline works
+python -m src.main --once
+```
+
+#### Run as a systemd service (persistent)
+
+```bash
+sudo tee /etc/systemd/system/security-middleware.service > /dev/null <<EOF
+[Unit]
+Description=Security Middleware Pipeline
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ec2-user
+WorkingDirectory=/opt/security-middleware
+EnvironmentFile=/etc/security-middleware/env
+ExecStart=/opt/security-middleware/venv/bin/python -m src.main
+Restart=on-failure
+RestartSec=30
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/security-middleware/data
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Enable and start
+sudo systemctl daemon-reload
+sudo systemctl enable security-middleware
+sudo systemctl start security-middleware
+
+# Check status and logs
+sudo systemctl status security-middleware
+sudo journalctl -u security-middleware -f
+```
+
+#### (Optional) CloudWatch log forwarding
+
+```bash
+# Install the CloudWatch agent
+sudo yum install -y amazon-cloudwatch-agent
+
+# Add middleware logs to the CloudWatch config (/opt/aws/amazon-cloudwatch-agent/etc/)
+# Point it at the journal for the security-middleware unit:
+#   "collect_list": [{
+#     "log_group_name": "/ec2/security-middleware",
+#     "log_stream_name": "{instance_id}",
+#     "journal_log": { "unit": "security-middleware" }
+#   }]
+
+sudo systemctl restart amazon-cloudwatch-agent
+```
+
 ---
 
 ## Configuration Reference
