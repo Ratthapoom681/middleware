@@ -14,10 +14,13 @@ import argparse
 import logging
 import os
 import sys
+from collections import deque
 from dataclasses import asdict
+from datetime import datetime, timezone
 from pathlib import Path
 
 import threading
+import uuid
 
 import yaml
 from flask import Flask, jsonify, request, send_from_directory
@@ -226,6 +229,25 @@ def wazuh_webhook():
         stats = pipeline.process_batch(findings)
         pipeline.dedup_stage.close()
 
+        # Log it to our Dashboard Queue
+        record = {
+            "id": str(uuid.uuid4()),
+            "receive_time": datetime.now(timezone.utc).isoformat(),
+            "alert_count": len(data),
+            "findings": [],
+            "stats": stats
+        }
+        
+        # Add limited metadata about the findings for the UI
+        for finding in findings:
+            record["findings"].append({
+                "title": finding.title,
+                "severity": finding.severity.value,
+                "source": finding.source_id
+            })
+
+        WEBHOOK_HISTORY.appendleft(record)
+
         return jsonify({"status": "ok", "stats": stats}), 200
 
     except Exception as e:
@@ -233,7 +255,20 @@ def wazuh_webhook():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
-# ── Helpers ───────────────────────────────────────────────────────────
+@app.route("/api/webhook/history", methods=["GET"])
+def get_webhook_history():
+    """
+    Returns the last 200 webhook events for the Live Events Dashboard.
+    """
+    return jsonify({"status": "ok", "history": list(WEBHOOK_HISTORY)}), 200
+
+
+# ── Webhook Dashboard State ───────────────────────────────────────────
+
+# In-memory rolling log of the last 200 webhook events
+WEBHOOK_HISTORY = deque(maxlen=200)
+
+# ── API Routes (Config Manager) ──────────────────────────────────────────
 
 def _config_to_dict(config: AppConfig) -> dict:
     """Convert AppConfig to a plain dict."""

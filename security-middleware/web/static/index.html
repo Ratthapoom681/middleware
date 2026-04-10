@@ -603,6 +603,14 @@
         </div>
 
         <div class="nav-group">
+            <div class="nav-group-label">Monitoring</div>
+            <div class="nav-item" data-section="live">
+                <span class="nav-icon">&#128373;</span>
+                Live Events
+            </div>
+        </div>
+
+        <div class="nav-group">
             <div class="nav-group-label">System</div>
             <div class="nav-item" data-section="logging">
                 <span class="nav-icon">&#9776;</span>
@@ -949,6 +957,35 @@
         </div>
     </div>
 
+    <!-- ════════════════════════════════════════════════════════ -->
+    <!--                  LIVE EVENTS SECTION                     -->
+    <!-- ════════════════════════════════════════════════════════ -->
+    <div class="section-page" id="page-live">
+        <div class="card">
+            <div class="card-title">
+                Incoming Webhook Activity (Last 200)
+                <span style="margin-left:auto">
+                    <span id="live-refresh-status" class="conn-status ok" style="font-size:10px">&#8635; Auto-refreshing</span>
+                </span>
+            </div>
+            <div style="overflow-x: auto;">
+                <table class="priority-table" id="live-events-table" style="width: 100%">
+                    <thead>
+                        <tr>
+                            <th style="width: 150px">Time (UTC)</th>
+                            <th style="width: 80px">Count</th>
+                            <th>Findings Overview</th>
+                            <th style="width: 180px">Pipeline Stats</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td colspan="4" style="text-align:center; color:var(--text-muted)">Awaiting events...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
 </main>
 
 <!-- ── JavaScript ────────────────────────────────────────────────── -->
@@ -965,6 +1002,7 @@ const sectionTitles = {
     filter:     'Filter Rules',
     dedup:      'Deduplication',
     enrichment: 'Enrichment',
+    live:       'Live Events Queue',
     logging:    'Logging',
     preview:    'YAML Preview',
 };
@@ -1286,6 +1324,69 @@ function toast(message, type) {
     container.appendChild(el);
     setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .3s'; setTimeout(() => el.remove(), 300); }, 4000);
 }
+
+// ── Live Events ──────────────────────────────────────────────
+async function fetchLiveEvents() {
+    try {
+        const res = await fetch('/api/webhook/history');
+        const data = await res.json();
+        const tbody = document.querySelector('#live-events-table tbody');
+        
+        let statusBadge = document.getElementById('live-refresh-status');
+        if (statusBadge) {
+            statusBadge.className = 'conn-status ok';
+            statusBadge.innerHTML = '&#8635; Auto-refreshing';
+        }
+
+        if (!data.history || data.history.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--text-muted); padding:20px 0;">No webhook events received since last restart.<br><span style="font-size:11px;opacity:0.7">Trigger an alert to see it appear here instantly!</span></td></tr>';
+            return;
+        }
+
+        let html = '';
+        data.history.forEach(evt => {
+            const time = evt.receive_time.replace('T', ' ').substring(0, 19);
+            
+            let findingsHtml = '';
+            if (evt.findings && evt.findings.length) {
+                const f = evt.findings[0];
+                findingsHtml = `<b>${escapeHtml(f.title || 'Unknown Rule')}</b><br><span class="badge badge-orange" style="margin-top:4px;display:inline-block">Sev: ${escapeHtml(f.severity)}</span>`;
+                if (evt.findings.length > 1) {
+                    findingsHtml += ` <span style="font-size:11px;color:var(--text-muted)">+ ${evt.findings.length - 1} more</span>`;
+                }
+            } else {
+                findingsHtml = '<span style="color:var(--text-muted)">No parsable findings</span>';
+            }
+
+            const s = evt.stats || {};
+            let statsHtml = [];
+            if (s.created > 0) statsHtml.push(`<span style="color:var(--green)">Created: ${s.created}</span>`);
+            if (s.updated > 0) statsHtml.push(`<span style="color:var(--accent)">Updated: ${s.updated}</span>`);
+            if (s.deduplicated > 0) statsHtml.push(`<span style="color:var(--orange)">Deduplicated: ${s.deduplicated}</span>`);
+            if (s.filtered > 0) statsHtml.push(`<span style="color:var(--text-muted)">Filtered: ${s.filtered}</span>`);
+            if (s.failed > 0) statsHtml.push(`<span style="color:var(--red)">Failed: ${s.failed}</span>`);
+
+            html += `<tr>
+                <td style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-secondary)">${time}</td>
+                <td>${evt.alert_count}</td>
+                <td style="font-size:13px">${findingsHtml}</td>
+                <td style="font-size:12px;font-weight:600;display:flex;flex-direction:column;gap:3px">${statsHtml.join('') || '-'}</td>
+            </tr>`;
+        });
+        
+        tbody.innerHTML = html;
+    } catch(e) {
+        console.error("Live events fetch failed", e);
+        let statusBadge = document.getElementById('live-refresh-status');
+        if (statusBadge) {
+            statusBadge.className = 'conn-status fail';
+            statusBadge.textContent = 'Disconnected';
+        }
+    }
+}
+
+setInterval(fetchLiveEvents, 3000);
+fetchLiveEvents();
 
 // ── Init ───────────────────────────────────────────────────────
 loadConfig();
