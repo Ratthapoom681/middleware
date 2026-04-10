@@ -42,8 +42,9 @@ logger = logging.getLogger(__name__)
 
 CONFIG_PATH = PROJECT_ROOT / "config" / "config.yaml"
 BACKUP_DIR = PROJECT_ROOT / "config" / "backups"
+STATIC_DIR = PROJECT_ROOT / "web" / "static"
 
-app = Flask(__name__, static_folder="static", static_url_path="/static")
+app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="/static")
 
 
 # ── API Endpoints ─────────────────────────────────────────────────────
@@ -263,7 +264,7 @@ def _build_yaml(data: dict) -> str:
 
 def main():
     parser = argparse.ArgumentParser(description="Security Middleware Config Web UI")
-    parser.add_argument("--host", default="127.0.0.1", help="Host to bind to")
+    parser.add_argument("--host", default="localhost", help="Host to bind to")
     parser.add_argument("--port", type=int, default=5000, help="Port to listen on")
     parser.add_argument("--debug", action="store_true", help="Enable debug mode")
     args = parser.parse_args()
