@@ -1,0 +1,77 @@
+# ============================================================
+# Security Middleware Pipeline - Configuration
+# ============================================================
+
+# --- Wazuh SIEM ---
+wazuh:
+  base_url: "https://wazuh.example.com:55000"
+  username: "wazuh-api-user"
+  password: "changeme"
+  verify_ssl: false
+  # Only fetch alerts with level >= this value (0-15)
+  min_level: 7
+
+# --- DefectDojo Vulnerability Management ---
+defectdojo:
+  base_url: "https://defectdojo.example.com/api/v2"
+  api_key: "Token changeme"
+  verify_ssl: true
+  # Only fetch findings with these severities
+  severity_filter:
+    - Critical
+    - High
+    - Medium
+
+# --- Redmine Issue Tracker ---
+redmine:
+  base_url: "https://redmine.example.com"
+  api_key: "changeme"
+  project_id: "security-incidents"
+  tracker_id: 1                   # Bug / Incident tracker ID
+  # Custom field ID for storing dedup hash (optional, set to null to use subject matching)
+  dedup_custom_field_id: null
+  # Map unified severity → Redmine priority ID
+  priority_map:
+    critical: 5
+    high: 4
+    medium: 3
+    low: 2
+    info: 1
+
+# --- Pipeline Settings ---
+pipeline:
+  # Polling interval in seconds
+  poll_interval: 300              # 5 minutes
+
+  # Filter rules
+  filter:
+    # Minimum unified severity to keep (info, low, medium, high, critical)
+    min_severity: "low"
+    # Exclude alerts matching these Wazuh rule IDs
+    exclude_rule_ids: []
+    # Only include findings for these hosts (regex patterns, empty = all)
+    include_hosts: []
+    # Exclude findings matching these title patterns (regex)
+    exclude_title_patterns:
+      - "^Syscheck.*"
+
+  # Deduplication
+  dedup:
+    enabled: true
+    # SQLite database path for tracking seen hashes
+    db_path: "data/dedup.db"
+    # Time-to-live in hours — findings can be re-created after this window
+    ttl_hours: 168                # 7 days
+
+  # Enrichment
+  enrichment:
+    # Add asset metadata from a static inventory
+    asset_inventory_enabled: false
+    asset_inventory_path: "config/assets.yaml"
+    # Add remediation links
+    add_remediation_links: true
+
+# --- Logging ---
+logging:
+  level: "INFO"                   # DEBUG, INFO, WARNING, ERROR
+  format: "%(asctime)s [%(levelname)s] %(name)s: %(message)s"

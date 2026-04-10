@@ -1,0 +1,60 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.3, pytest-8.3.3, pluggy-1.6.0 -- C:\Users\ifilm\AppData\Local\Python\pythoncore-3.14-64\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\ifilm\Downloads\Document\security-middleware
+plugins: anyio-4.12.1
+collecting ... collected 24 items
+
+tests/test_deduplicator.py::TestDeduplicator::test_first_occurrence_passes PASSED [  4%]
+tests/test_deduplicator.py::TestDeduplicator::test_duplicate_dropped PASSED [  8%]
+tests/test_deduplicator.py::TestDeduplicator::test_duplicate_dropped_within_same_batch PASSED [ 12%]
+tests/test_deduplicator.py::TestDeduplicator::test_different_findings_pass PASSED [ 16%]
+tests/test_deduplicator.py::TestDeduplicator::test_same_title_different_host PASSED [ 20%]
+tests/test_deduplicator.py::TestDeduplicator::test_disabled PASSED       [ 25%]
+tests/test_deduplicator.py::TestDeduplicator::test_stats PASSED          [ 29%]
+tests/test_defectdojo_client.py::test_lowercase_severity_maps_correctly PASSED [ 33%]
+tests/test_filter.py::TestFilterStage::test_passes_all_when_no_rules PASSED [ 37%]
+tests/test_filter.py::TestFilterStage::test_min_severity_drops_low PASSED [ 41%]
+tests/test_filter.py::TestFilterStage::test_exclude_rule_ids PASSED      [ 45%]
+tests/test_filter.py::TestFilterStage::test_include_hosts PASSED         [ 50%]
+tests/test_filter.py::TestFilterStage::test_exclude_title_patterns PASSED [ 54%]
+tests/test_filter.py::TestFilterStage::test_combined_rules PASSED        [ 58%]
+tests/test_pipeline.py::test_full_pipeline_cycle PASSED                  [ 62%]
+tests/test_severity_mapper.py::TestSeverityMapper::test_wazuh_level_critical PASSED [ 66%]
+tests/test_severity_mapper.py::TestSeverityMapper::test_wazuh_level_high PASSED [ 70%]
+tests/test_severity_mapper.py::TestSeverityMapper::test_wazuh_level_medium PASSED [ 75%]
+tests/test_severity_mapper.py::TestSeverityMapper::test_wazuh_level_low PASSED [ 79%]
+tests/test_severity_mapper.py::TestSeverityMapper::test_wazuh_level_info PASSED [ 83%]
+tests/test_severity_mapper.py::TestSeverityMapper::test_defectdojo_critical PASSED [ 87%]
+tests/test_severity_mapper.py::TestSeverityMapper::test_defectdojo_medium PASSED [ 91%]
+tests/test_severity_mapper.py::TestSeverityMapper::test_invalid_raw_severity PASSED [ 95%]
+tests/test_severity_mapper.py::TestSeverityMapper::test_priority_map_output PASSED [100%]
+
+============================== warnings summary ===============================
+tests/test_deduplicator.py: 12 warnings
+tests/test_filter.py: 18 warnings
+tests/test_severity_mapper.py: 10 warnings
+  <string>:13: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/test_pipeline.py::test_full_pipeline_cycle
+  C:\Users\ifilm\Downloads\Document\security-middleware\src\main.py:89: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    cycle_start = datetime.utcnow()
+
+tests/test_pipeline.py::test_full_pipeline_cycle
+  C:\Users\ifilm\Downloads\Document\security-middleware\src\sources\wazuh_client.py:71: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    self._token_expiry = datetime.utcnow() + timedelta(seconds=850)
+
+tests/test_pipeline.py::test_full_pipeline_cycle
+  C:\Users\ifilm\Downloads\Document\security-middleware\src\sources\wazuh_client.py:96: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    since = self._last_poll or (datetime.utcnow() - timedelta(minutes=since_minutes))
+
+tests/test_pipeline.py::test_full_pipeline_cycle
+  C:\Users\ifilm\Downloads\Document\security-middleware\src\sources\wazuh_client.py:125: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    self._last_poll = datetime.utcnow()
+
+tests/test_pipeline.py::test_full_pipeline_cycle
+  C:\Users\ifilm\Downloads\Document\security-middleware\src\main.py:145: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    elapsed = (datetime.utcnow() - cycle_start).total_seconds()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================= 24 passed, 45 warnings in 0.47s =======================
