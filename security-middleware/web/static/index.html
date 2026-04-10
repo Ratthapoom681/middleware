@@ -1,0 +1,1295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Security Middleware — Configuration</title>
+    <meta name="description" content="Web-based configuration editor for the Security Middleware Pipeline">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        /* ── Reset & Tokens ──────────────────────────────────── */
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root {
+            --bg-base:    #0b0e14;
+            --bg-surface: #111621;
+            --bg-card:    #161b27;
+            --bg-input:   #1a2030;
+            --bg-hover:   #1e2636;
+            --border:     #252d3d;
+            --border-focus:#3b82f6;
+            --text-primary:   #e2e8f0;
+            --text-secondary: #8b95a8;
+            --text-muted:     #525c6e;
+            --accent:     #3b82f6;
+            --accent-glow: rgba(59,130,246,.15);
+            --green:      #22c55e;
+            --green-bg:   rgba(34,197,94,.1);
+            --red:        #ef4444;
+            --red-bg:     rgba(239,68,68,.1);
+            --orange:     #f59e0b;
+            --orange-bg:  rgba(245,158,11,.1);
+            --purple:     #a855f7;
+            --purple-bg:  rgba(168,85,247,.1);
+            --cyan:       #06b6d4;
+            --cyan-bg:    rgba(6,182,212,.1);
+            --radius:     10px;
+            --radius-sm:  6px;
+            --shadow:     0 4px 24px rgba(0,0,0,.35);
+            --transition: .2s cubic-bezier(.4,0,.2,1);
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, sans-serif;
+            background: var(--bg-base);
+            color: var(--text-primary);
+            line-height: 1.6;
+            min-height: 100vh;
+            display: flex;
+        }
+
+        /* ── Sidebar ─────────────────────────────────────────── */
+        .sidebar {
+            width: 260px;
+            min-height: 100vh;
+            background: var(--bg-surface);
+            border-right: 1px solid var(--border);
+            padding: 24px 0;
+            display: flex;
+            flex-direction: column;
+            position: fixed;
+            top: 0;
+            left: 0;
+            z-index: 100;
+        }
+
+        .sidebar-brand {
+            padding: 0 24px 24px;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 16px;
+        }
+
+        .sidebar-brand h1 {
+            font-size: 15px;
+            font-weight: 700;
+            letter-spacing: -.02em;
+            background: linear-gradient(135deg, var(--accent), var(--cyan));
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .sidebar-brand p {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        .nav-group {
+            padding: 0 12px;
+            margin-bottom: 8px;
+        }
+
+        .nav-group-label {
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: .08em;
+            color: var(--text-muted);
+            padding: 12px 12px 6px;
+        }
+
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 9px 12px;
+            border-radius: var(--radius-sm);
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all var(--transition);
+            user-select: none;
+        }
+
+        .nav-item:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+
+        .nav-item.active {
+            background: var(--accent-glow);
+            color: var(--accent);
+        }
+
+        .nav-icon {
+            width: 18px;
+            height: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+        }
+
+        .nav-status {
+            margin-left: auto;
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: var(--text-muted);
+        }
+
+        .nav-status.connected { background: var(--green); box-shadow: 0 0 6px var(--green); }
+        .nav-status.error     { background: var(--red); box-shadow: 0 0 6px var(--red); }
+        .nav-status.testing   { background: var(--orange); animation: pulse 1s infinite; }
+
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+        .sidebar-footer {
+            margin-top: auto;
+            padding: 16px 24px;
+            border-top: 1px solid var(--border);
+        }
+
+        .sidebar-footer .version {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        /* ── Main Content ────────────────────────────────────── */
+        .main {
+            margin-left: 260px;
+            flex: 1;
+            padding: 32px 40px;
+            max-width: 900px;
+        }
+
+        .main-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 28px;
+        }
+
+        .main-header h2 {
+            font-size: 22px;
+            font-weight: 700;
+            letter-spacing: -.02em;
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        /* ── Buttons ─────────────────────────────────────────── */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 16px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            background: var(--bg-card);
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all var(--transition);
+        }
+
+        .btn:hover { background: var(--bg-hover); border-color: var(--text-muted); }
+
+        .btn-primary {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: #fff;
+        }
+
+        .btn-primary:hover {
+            background: #2563eb;
+            border-color: #2563eb;
+            box-shadow: 0 0 20px rgba(59,130,246,.25);
+        }
+
+        .btn-danger  { color: var(--red); }
+        .btn-danger:hover { background: var(--red-bg); border-color: var(--red); }
+
+        .btn-success { color: var(--green); }
+        .btn-success:hover { background: var(--green-bg); border-color: var(--green); }
+
+        .btn-sm { padding: 5px 10px; font-size: 12px; }
+
+        .btn:disabled {
+            opacity: .5;
+            cursor: not-allowed;
+        }
+
+        /* ── Cards ───────────────────────────────────────────── */
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 24px;
+            margin-bottom: 20px;
+            transition: border-color var(--transition);
+        }
+
+        .card:hover { border-color: #313b50; }
+
+        .card-title {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 18px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .card-title .badge {
+            font-size: 10px;
+            padding: 2px 8px;
+            border-radius: 100px;
+            font-weight: 600;
+        }
+
+        .badge-blue   { background: var(--accent-glow); color: var(--accent); }
+        .badge-green  { background: var(--green-bg);  color: var(--green); }
+        .badge-orange { background: var(--orange-bg); color: var(--orange); }
+        .badge-purple { background: var(--purple-bg); color: var(--purple); }
+
+        /* ── Form ────────────────────────────────────────────── */
+        .form-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+
+        .form-grid .full-width { grid-column: 1 / -1; }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .form-group label {
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text-secondary);
+        }
+
+        .form-group label .hint {
+            font-weight: 400;
+            color: var(--text-muted);
+            margin-left: 4px;
+        }
+
+        input[type="text"],
+        input[type="number"],
+        input[type="password"],
+        input[type="url"],
+        select,
+        textarea {
+            width: 100%;
+            padding: 9px 12px;
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            color: var(--text-primary);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            transition: all var(--transition);
+            outline: none;
+        }
+
+        input:focus, select:focus, textarea:focus {
+            border-color: var(--border-focus);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+
+        input::placeholder { color: var(--text-muted); }
+
+        textarea {
+            min-height: 80px;
+            resize: vertical;
+        }
+
+        /* Toggle switch */
+        .toggle-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 0;
+        }
+
+        .toggle-label {
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        .toggle-desc {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        .toggle {
+            position: relative;
+            width: 40px;
+            height: 22px;
+            flex-shrink: 0;
+        }
+
+        .toggle input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .toggle-track {
+            position: absolute;
+            inset: 0;
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            border-radius: 100px;
+            cursor: pointer;
+            transition: all var(--transition);
+        }
+
+        .toggle-track::after {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 16px;
+            height: 16px;
+            background: var(--text-muted);
+            border-radius: 50%;
+            transition: all var(--transition);
+        }
+
+        .toggle input:checked + .toggle-track {
+            background: var(--accent);
+            border-color: var(--accent);
+        }
+
+        .toggle input:checked + .toggle-track::after {
+            transform: translateX(18px);
+            background: #fff;
+        }
+
+        /* Tag / chip input */
+        .chip-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            padding: 6px 8px;
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            min-height: 40px;
+            align-items: center;
+            cursor: text;
+            transition: all var(--transition);
+        }
+
+        .chip-container:focus-within {
+            border-color: var(--border-focus);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+
+        .chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 3px 8px;
+            background: var(--bg-hover);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            font-size: 12px;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--text-primary);
+        }
+
+        .chip-remove {
+            cursor: pointer;
+            color: var(--text-muted);
+            font-size: 14px;
+            line-height: 1;
+        }
+
+        .chip-remove:hover { color: var(--red); }
+
+        .chip-input {
+            border: none !important;
+            background: transparent !important;
+            padding: 3px 4px !important;
+            font-size: 12px !important;
+            flex: 1;
+            min-width: 80px;
+            box-shadow: none !important;
+        }
+
+        /* ── Toast Notifications ─────────────────────────────── */
+        .toast-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .toast {
+            padding: 12px 20px;
+            border-radius: var(--radius-sm);
+            font-size: 13px;
+            font-weight: 500;
+            box-shadow: var(--shadow);
+            animation: slideIn .3s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 280px;
+        }
+
+        .toast-success { background: #14532d; border: 1px solid #22c55e33; color: var(--green); }
+        .toast-error   { background: #450a0a; border: 1px solid #ef444433; color: var(--red); }
+        .toast-warning { background: #451a03; border: 1px solid #f59e0b33; color: var(--orange); }
+        .toast-info    { background: #0c2340; border: 1px solid #3b82f633; color: var(--accent); }
+
+        @keyframes slideIn { from{transform:translateX(100%);opacity:0} to{transform:none;opacity:1} }
+
+        /* ── Section pages (show/hide) ───────────────────────── */
+        .section-page { display: none; }
+        .section-page.active { display: block; }
+
+        /* ── Priority map table ──────────────────────────────── */
+        .priority-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .priority-table th {
+            text-align: left;
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: .05em;
+            padding: 8px 12px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .priority-table td {
+            padding: 8px 12px;
+            border-bottom: 1px solid var(--border);
+            font-size: 13px;
+        }
+
+        .priority-table input {
+            width: 70px;
+        }
+
+        .severity-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 6px;
+        }
+
+        .severity-dot.critical { background: #ef4444; }
+        .severity-dot.high     { background: #f59e0b; }
+        .severity-dot.medium   { background: #a855f7; }
+        .severity-dot.low      { background: #3b82f6; }
+        .severity-dot.info     { background: #6b7280; }
+
+        /* ── Connection status block ─────────────────────────── */
+        .conn-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border-radius: 100px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .conn-status.ok      { background: var(--green-bg); color: var(--green); }
+        .conn-status.fail    { background: var(--red-bg); color: var(--red); }
+        .conn-status.pending { background: var(--orange-bg); color: var(--orange); }
+
+        /* ── YAML Preview ────────────────────────────────────── */
+        .yaml-preview {
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 16px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            line-height: 1.7;
+            color: var(--text-secondary);
+            white-space: pre-wrap;
+            max-height: 500px;
+            overflow-y: auto;
+        }
+
+        /* ── Scrollbar ───────────────────────────────────────── */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+        /* ── Responsive ──────────────────────────────────────── */
+        @media (max-width: 900px) {
+            .sidebar { width: 220px; }
+            .main { margin-left: 220px; padding: 24px; }
+            .form-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- ── Sidebar ────────────────────────────────────────────────────── -->
+<aside class="sidebar">
+    <div class="sidebar-brand">
+        <h1>Security Middleware</h1>
+        <p>Pipeline Configuration</p>
+    </div>
+
+    <nav>
+        <div class="nav-group">
+            <div class="nav-group-label">Data Sources</div>
+            <div class="nav-item active" data-section="wazuh">
+                <span class="nav-icon">&#9737;</span>
+                Wazuh SIEM
+                <span class="nav-status" id="status-wazuh"></span>
+            </div>
+            <div class="nav-item" data-section="defectdojo">
+                <span class="nav-icon">&#9878;</span>
+                DefectDojo
+                <span class="nav-status" id="status-defectdojo"></span>
+            </div>
+        </div>
+
+        <div class="nav-group">
+            <div class="nav-group-label">Output</div>
+            <div class="nav-item" data-section="redmine">
+                <span class="nav-icon">&#9881;</span>
+                Redmine
+                <span class="nav-status" id="status-redmine"></span>
+            </div>
+        </div>
+
+        <div class="nav-group">
+            <div class="nav-group-label">Pipeline</div>
+            <div class="nav-item" data-section="filter">
+                <span class="nav-icon">&#9782;</span>
+                Filter Rules
+            </div>
+            <div class="nav-item" data-section="dedup">
+                <span class="nav-icon">&#8997;</span>
+                Deduplication
+            </div>
+            <div class="nav-item" data-section="enrichment">
+                <span class="nav-icon">&#10024;</span>
+                Enrichment
+            </div>
+        </div>
+
+        <div class="nav-group">
+            <div class="nav-group-label">System</div>
+            <div class="nav-item" data-section="logging">
+                <span class="nav-icon">&#9776;</span>
+                Logging
+            </div>
+            <div class="nav-item" data-section="preview">
+                <span class="nav-icon">&#128196;</span>
+                YAML Preview
+            </div>
+        </div>
+    </nav>
+
+    <div class="sidebar-footer">
+        <div class="version">Config UI v1.0</div>
+    </div>
+</aside>
+
+<!-- ── Toast Container ───────────────────────────────────────────── -->
+<div class="toast-container" id="toasts"></div>
+
+<!-- ── Main Content ──────────────────────────────────────────────── -->
+<main class="main">
+
+    <!-- ─── Header ───────────────────────────────────────────── -->
+    <div class="main-header">
+        <h2 id="section-title">Wazuh SIEM</h2>
+        <div class="header-actions">
+            <button class="btn" onclick="loadConfig()">&#8635; Reload</button>
+            <button class="btn btn-primary" onclick="saveConfig()">&#10003; Save Config</button>
+        </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════ -->
+    <!--                    WAZUH SECTION                        -->
+    <!-- ════════════════════════════════════════════════════════ -->
+    <div class="section-page active" id="page-wazuh">
+        <div class="card">
+            <div class="card-title">
+                Connection <span class="badge badge-blue">API v4</span>
+                <span style="margin-left:auto" id="conn-badge-wazuh"></span>
+            </div>
+            <div class="form-grid">
+                <div class="form-group full-width">
+                    <label>Base URL</label>
+                    <input type="url" id="wazuh-base_url" placeholder="https://wazuh-manager:55000">
+                </div>
+                <div class="form-group">
+                    <label>Username</label>
+                    <input type="text" id="wazuh-username" placeholder="wazuh-api-user">
+                </div>
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="password" id="wazuh-password" placeholder="********">
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Options</div>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>Minimum Alert Level <span class="hint">(0-15)</span></label>
+                    <input type="number" id="wazuh-min_level" min="0" max="15" placeholder="7">
+                </div>
+                <div class="form-group" style="display:flex;align-items:end">
+                    <div class="toggle-row" style="width:100%">
+                        <div>
+                            <div class="toggle-label">Verify SSL</div>
+                            <div class="toggle-desc">Validate TLS certificates</div>
+                        </div>
+                        <label class="toggle">
+                            <input type="checkbox" id="wazuh-verify_ssl">
+                            <span class="toggle-track"></span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div style="display:flex;gap:10px">
+            <button class="btn btn-success" onclick="testConnection('wazuh')">&#9889; Test Connection</button>
+        </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════ -->
+    <!--                  DEFECTDOJO SECTION                      -->
+    <!-- ════════════════════════════════════════════════════════ -->
+    <div class="section-page" id="page-defectdojo">
+        <div class="card">
+            <div class="card-title">
+                Connection <span class="badge badge-green">REST API v2</span>
+                <span style="margin-left:auto" id="conn-badge-defectdojo"></span>
+            </div>
+            <div class="form-grid">
+                <div class="form-group full-width">
+                    <label>Base URL</label>
+                    <input type="url" id="defectdojo-base_url" placeholder="https://defectdojo.example.com/api/v2">
+                </div>
+                <div class="form-group full-width">
+                    <label>API Key <span class="hint">(include "Token " prefix)</span></label>
+                    <input type="password" id="defectdojo-api_key" placeholder="Token your-api-key">
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Options</div>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>Severity Filter</label>
+                    <div id="defectdojo-severity_filter-chips" class="chip-container" data-field="defectdojo-severity_filter"></div>
+                </div>
+                <div class="form-group" style="display:flex;align-items:end">
+                    <div class="toggle-row" style="width:100%">
+                        <div>
+                            <div class="toggle-label">Verify SSL</div>
+                            <div class="toggle-desc">Validate TLS certificates</div>
+                        </div>
+                        <label class="toggle">
+                            <input type="checkbox" id="defectdojo-verify_ssl">
+                            <span class="toggle-track"></span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div style="display:flex;gap:10px">
+            <button class="btn btn-success" onclick="testConnection('defectdojo')">&#9889; Test Connection</button>
+        </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════ -->
+    <!--                   REDMINE SECTION                       -->
+    <!-- ════════════════════════════════════════════════════════ -->
+    <div class="section-page" id="page-redmine">
+        <div class="card">
+            <div class="card-title">
+                Connection <span class="badge badge-orange">REST API</span>
+                <span style="margin-left:auto" id="conn-badge-redmine"></span>
+            </div>
+            <div class="form-grid">
+                <div class="form-group full-width">
+                    <label>Base URL</label>
+                    <input type="url" id="redmine-base_url" placeholder="https://redmine.example.com">
+                </div>
+                <div class="form-group full-width">
+                    <label>API Key</label>
+                    <input type="password" id="redmine-api_key" placeholder="your-api-key">
+                </div>
+                <div class="form-group">
+                    <label>Project ID</label>
+                    <input type="text" id="redmine-project_id" placeholder="security-incidents">
+                </div>
+                <div class="form-group">
+                    <label>Tracker ID</label>
+                    <input type="number" id="redmine-tracker_id" min="1" placeholder="1">
+                </div>
+                <div class="form-group">
+                    <label>Dedup Custom Field ID <span class="hint">(optional)</span></label>
+                    <input type="number" id="redmine-dedup_custom_field_id" placeholder="null">
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Priority Mapping</div>
+            <table class="priority-table">
+                <thead>
+                    <tr><th>Severity</th><th>Redmine Priority ID</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td><span class="severity-dot critical"></span>Critical</td><td><input type="number" id="priority-critical" min="1"></td></tr>
+                    <tr><td><span class="severity-dot high"></span>High</td><td><input type="number" id="priority-high" min="1"></td></tr>
+                    <tr><td><span class="severity-dot medium"></span>Medium</td><td><input type="number" id="priority-medium" min="1"></td></tr>
+                    <tr><td><span class="severity-dot low"></span>Low</td><td><input type="number" id="priority-low" min="1"></td></tr>
+                    <tr><td><span class="severity-dot info"></span>Info</td><td><input type="number" id="priority-info" min="1"></td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div style="display:flex;gap:10px">
+            <button class="btn btn-success" onclick="testConnection('redmine')">&#9889; Test Connection</button>
+        </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════ -->
+    <!--                   FILTER SECTION                        -->
+    <!-- ════════════════════════════════════════════════════════ -->
+    <div class="section-page" id="page-filter">
+        <div class="card">
+            <div class="card-title">Severity Threshold</div>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>Minimum Severity</label>
+                    <select id="filter-min_severity">
+                        <option value="info">Info (keep all)</option>
+                        <option value="low">Low</option>
+                        <option value="medium">Medium</option>
+                        <option value="high">High</option>
+                        <option value="critical">Critical</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Exclusions</div>
+            <div class="form-grid">
+                <div class="form-group full-width">
+                    <label>Exclude Rule IDs <span class="hint">(Wazuh rule IDs to ignore)</span></label>
+                    <div id="filter-exclude_rule_ids-chips" class="chip-container" data-field="filter-exclude_rule_ids"></div>
+                </div>
+                <div class="form-group full-width">
+                    <label>Exclude Title Patterns <span class="hint">(regex, press Enter to add)</span></label>
+                    <div id="filter-exclude_title_patterns-chips" class="chip-container" data-field="filter-exclude_title_patterns"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Host Filtering</div>
+            <div class="form-grid">
+                <div class="form-group full-width">
+                    <label>Include Hosts <span class="hint">(regex patterns, empty = all hosts)</span></label>
+                    <div id="filter-include_hosts-chips" class="chip-container" data-field="filter-include_hosts"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════ -->
+    <!--                   DEDUP SECTION                         -->
+    <!-- ════════════════════════════════════════════════════════ -->
+    <div class="section-page" id="page-dedup">
+        <div class="card">
+            <div class="card-title">Deduplication Engine</div>
+            <div class="toggle-row">
+                <div>
+                    <div class="toggle-label">Enable Deduplication</div>
+                    <div class="toggle-desc">Track finding hashes in SQLite to prevent duplicate tickets</div>
+                </div>
+                <label class="toggle">
+                    <input type="checkbox" id="dedup-enabled">
+                    <span class="toggle-track"></span>
+                </label>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Settings</div>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>Database Path</label>
+                    <input type="text" id="dedup-db_path" placeholder="data/dedup.db">
+                </div>
+                <div class="form-group">
+                    <label>TTL <span class="hint">(hours, after which findings can re-create tickets)</span></label>
+                    <input type="number" id="dedup-ttl_hours" min="1" placeholder="168">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════ -->
+    <!--                 ENRICHMENT SECTION                      -->
+    <!-- ════════════════════════════════════════════════════════ -->
+    <div class="section-page" id="page-enrichment">
+        <div class="card">
+            <div class="card-title">Enrichment Options</div>
+            <div class="toggle-row">
+                <div>
+                    <div class="toggle-label">Asset Inventory Lookup</div>
+                    <div class="toggle-desc">Match findings to assets from a YAML inventory file</div>
+                </div>
+                <label class="toggle">
+                    <input type="checkbox" id="enrichment-asset_inventory_enabled">
+                    <span class="toggle-track"></span>
+                </label>
+            </div>
+            <div class="toggle-row">
+                <div>
+                    <div class="toggle-label">Remediation Links</div>
+                    <div class="toggle-desc">Auto-generate NVD and MITRE ATT&CK links for CVEs</div>
+                </div>
+                <label class="toggle">
+                    <input type="checkbox" id="enrichment-add_remediation_links">
+                    <span class="toggle-track"></span>
+                </label>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Asset Inventory</div>
+            <div class="form-grid">
+                <div class="form-group full-width">
+                    <label>Inventory File Path</label>
+                    <input type="text" id="enrichment-asset_inventory_path" placeholder="config/assets.yaml">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════ -->
+    <!--                  LOGGING SECTION                        -->
+    <!-- ════════════════════════════════════════════════════════ -->
+    <div class="section-page" id="page-logging">
+        <div class="card">
+            <div class="card-title">Logging Configuration</div>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>Log Level</label>
+                    <select id="logging-level">
+                        <option value="DEBUG">DEBUG</option>
+                        <option value="INFO">INFO</option>
+                        <option value="WARNING">WARNING</option>
+                        <option value="ERROR">ERROR</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Poll Interval <span class="hint">(seconds)</span></label>
+                    <input type="number" id="pipeline-poll_interval" min="10" placeholder="300">
+                </div>
+                <div class="form-group full-width">
+                    <label>Log Format</label>
+                    <input type="text" id="logging-format" placeholder="%(asctime)s [%(levelname)s] %(name)s: %(message)s">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════ -->
+    <!--                  YAML PREVIEW                           -->
+    <!-- ════════════════════════════════════════════════════════ -->
+    <div class="section-page" id="page-preview">
+        <div class="card">
+            <div class="card-title">
+                Generated YAML
+                <span style="margin-left:auto">
+                    <button class="btn btn-sm" onclick="copyYaml()">Copy</button>
+                </span>
+            </div>
+            <pre class="yaml-preview" id="yaml-output"></pre>
+        </div>
+    </div>
+
+</main>
+
+<!-- ── JavaScript ────────────────────────────────────────────────── -->
+<script>
+// ── State ──────────────────────────────────────────────────────
+let config = {};
+const chipData = {};   // field -> string[]
+
+// ── Navigation ─────────────────────────────────────────────────
+const sectionTitles = {
+    wazuh:      'Wazuh SIEM',
+    defectdojo: 'DefectDojo',
+    redmine:    'Redmine',
+    filter:     'Filter Rules',
+    dedup:      'Deduplication',
+    enrichment: 'Enrichment',
+    logging:    'Logging',
+    preview:    'YAML Preview',
+};
+
+document.querySelectorAll('.nav-item[data-section]').forEach(item => {
+    item.addEventListener('click', () => {
+        document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+        item.classList.add('active');
+        const section = item.dataset.section;
+        document.querySelectorAll('.section-page').forEach(p => p.classList.remove('active'));
+        document.getElementById('page-' + section).classList.add('active');
+        document.getElementById('section-title').textContent = sectionTitles[section] || section;
+        if (section === 'preview') updateYamlPreview();
+    });
+});
+
+// ── Chip (tag) Input ───────────────────────────────────────────
+document.querySelectorAll('.chip-container').forEach(container => {
+    const field = container.dataset.field;
+    chipData[field] = [];
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'chip-input';
+    input.placeholder = 'Type and press Enter...';
+    container.appendChild(input);
+
+    container.addEventListener('click', () => input.focus());
+
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && input.value.trim()) {
+            e.preventDefault();
+            addChip(container, field, input.value.trim());
+            input.value = '';
+        }
+        if (e.key === 'Backspace' && !input.value && chipData[field].length) {
+            removeChipByIndex(container, field, chipData[field].length - 1);
+        }
+    });
+});
+
+function addChip(container, field, value) {
+    if (chipData[field].includes(value)) return;
+    chipData[field].push(value);
+    renderChips(container, field);
+}
+
+function removeChipByIndex(container, field, index) {
+    chipData[field].splice(index, 1);
+    renderChips(container, field);
+}
+
+function renderChips(container, field) {
+    const input = container.querySelector('.chip-input');
+    container.querySelectorAll('.chip').forEach(c => c.remove());
+    chipData[field].forEach((val, i) => {
+        const chip = document.createElement('span');
+        chip.className = 'chip';
+        chip.innerHTML = `${escapeHtml(val)} <span class="chip-remove" data-index="${i}">&times;</span>`;
+        chip.querySelector('.chip-remove').addEventListener('click', () => {
+            removeChipByIndex(container, field, i);
+        });
+        container.insertBefore(chip, input);
+    });
+}
+
+function setChips(field, values) {
+    chipData[field] = values || [];
+    const container = document.querySelector(`[data-field="${field}"]`);
+    if (container) renderChips(container, field);
+}
+
+function escapeHtml(str) {
+    const d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
+}
+
+// ── Load Config ────────────────────────────────────────────────
+async function loadConfig() {
+    try {
+        const res = await fetch('/api/config');
+        const data = await res.json();
+        if (data.status !== 'ok') throw new Error(data.message);
+        config = data.config;
+        populateForm(config);
+        toast('Configuration loaded', 'success');
+    } catch (e) {
+        toast('Failed to load config: ' + e.message, 'error');
+    }
+}
+
+function populateForm(c) {
+    // Wazuh
+    setVal('wazuh-base_url', c.wazuh?.base_url);
+    setVal('wazuh-username', c.wazuh?.username);
+    setVal('wazuh-password', c.wazuh?.password);
+    setVal('wazuh-min_level', c.wazuh?.min_level);
+    setChecked('wazuh-verify_ssl', c.wazuh?.verify_ssl);
+
+    // DefectDojo
+    setVal('defectdojo-base_url', c.defectdojo?.base_url);
+    setVal('defectdojo-api_key', c.defectdojo?.api_key);
+    setChecked('defectdojo-verify_ssl', c.defectdojo?.verify_ssl);
+    setChips('defectdojo-severity_filter', c.defectdojo?.severity_filter);
+
+    // Redmine
+    setVal('redmine-base_url', c.redmine?.base_url);
+    setVal('redmine-api_key', c.redmine?.api_key);
+    setVal('redmine-project_id', c.redmine?.project_id);
+    setVal('redmine-tracker_id', c.redmine?.tracker_id);
+    setVal('redmine-dedup_custom_field_id', c.redmine?.dedup_custom_field_id);
+    const pm = c.redmine?.priority_map || {};
+    setVal('priority-critical', pm.critical);
+    setVal('priority-high', pm.high);
+    setVal('priority-medium', pm.medium);
+    setVal('priority-low', pm.low);
+    setVal('priority-info', pm.info);
+
+    // Pipeline - Filter
+    setVal('filter-min_severity', c.pipeline?.filter?.min_severity);
+    setChips('filter-exclude_rule_ids', c.pipeline?.filter?.exclude_rule_ids);
+    setChips('filter-include_hosts', c.pipeline?.filter?.include_hosts);
+    setChips('filter-exclude_title_patterns', c.pipeline?.filter?.exclude_title_patterns);
+
+    // Dedup
+    setChecked('dedup-enabled', c.pipeline?.dedup?.enabled);
+    setVal('dedup-db_path', c.pipeline?.dedup?.db_path);
+    setVal('dedup-ttl_hours', c.pipeline?.dedup?.ttl_hours);
+
+    // Enrichment
+    setChecked('enrichment-asset_inventory_enabled', c.pipeline?.enrichment?.asset_inventory_enabled);
+    setChecked('enrichment-add_remediation_links', c.pipeline?.enrichment?.add_remediation_links);
+    setVal('enrichment-asset_inventory_path', c.pipeline?.enrichment?.asset_inventory_path);
+
+    // Logging
+    setVal('logging-level', c.logging?.level);
+    setVal('logging-format', c.logging?.format);
+    setVal('pipeline-poll_interval', c.pipeline?.poll_interval);
+}
+
+function setVal(id, value) {
+    const el = document.getElementById(id);
+    if (el && value !== undefined && value !== null) el.value = value;
+}
+
+function setChecked(id, value) {
+    const el = document.getElementById(id);
+    if (el) el.checked = !!value;
+}
+
+// ── Collect Form → Config Object ───────────────────────────────
+function collectForm() {
+    return {
+        wazuh: {
+            base_url:   getVal('wazuh-base_url'),
+            username:   getVal('wazuh-username'),
+            password:   getVal('wazuh-password'),
+            verify_ssl: getChecked('wazuh-verify_ssl'),
+            min_level:  getInt('wazuh-min_level', 7),
+        },
+        defectdojo: {
+            base_url:        getVal('defectdojo-base_url'),
+            api_key:         getVal('defectdojo-api_key'),
+            verify_ssl:      getChecked('defectdojo-verify_ssl'),
+            severity_filter: chipData['defectdojo-severity_filter'] || [],
+        },
+        redmine: {
+            base_url:              getVal('redmine-base_url'),
+            api_key:               getVal('redmine-api_key'),
+            project_id:            getVal('redmine-project_id'),
+            tracker_id:            getInt('redmine-tracker_id', 1),
+            dedup_custom_field_id: getIntOrNull('redmine-dedup_custom_field_id'),
+            priority_map: {
+                critical: getInt('priority-critical', 5),
+                high:     getInt('priority-high', 4),
+                medium:   getInt('priority-medium', 3),
+                low:      getInt('priority-low', 2),
+                info:     getInt('priority-info', 1),
+            },
+        },
+        pipeline: {
+            poll_interval: getInt('pipeline-poll_interval', 300),
+            filter: {
+                min_severity:           getVal('filter-min_severity'),
+                exclude_rule_ids:       chipData['filter-exclude_rule_ids'] || [],
+                include_hosts:          chipData['filter-include_hosts'] || [],
+                exclude_title_patterns: chipData['filter-exclude_title_patterns'] || [],
+            },
+            dedup: {
+                enabled:   getChecked('dedup-enabled'),
+                db_path:   getVal('dedup-db_path'),
+                ttl_hours: getInt('dedup-ttl_hours', 168),
+            },
+            enrichment: {
+                asset_inventory_enabled: getChecked('enrichment-asset_inventory_enabled'),
+                asset_inventory_path:    getVal('enrichment-asset_inventory_path'),
+                add_remediation_links:   getChecked('enrichment-add_remediation_links'),
+            },
+        },
+        logging: {
+            level:  getVal('logging-level'),
+            format: getVal('logging-format'),
+        },
+    };
+}
+
+function getVal(id)  { return document.getElementById(id)?.value || ''; }
+function getChecked(id) { return document.getElementById(id)?.checked || false; }
+function getInt(id, def) { const v = parseInt(document.getElementById(id)?.value); return isNaN(v) ? def : v; }
+function getIntOrNull(id) { const v = parseInt(document.getElementById(id)?.value); return isNaN(v) ? null : v; }
+
+// ── Save Config ────────────────────────────────────────────────
+async function saveConfig() {
+    const data = collectForm();
+    try {
+        const res = await fetch('/api/config', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data),
+        });
+        const result = await res.json();
+        if (result.status === 'ok') {
+            toast('Configuration saved successfully', 'success');
+        } else {
+            toast('Save failed: ' + result.message, 'error');
+        }
+    } catch (e) {
+        toast('Save failed: ' + e.message, 'error');
+    }
+}
+
+// ── Test Connection ────────────────────────────────────────────
+async function testConnection(service) {
+    const statusEl = document.getElementById('status-' + service);
+    const badgeEl  = document.getElementById('conn-badge-' + service);
+
+    if (statusEl) { statusEl.className = 'nav-status testing'; }
+    if (badgeEl)  { badgeEl.innerHTML = '<span class="conn-status pending">Testing...</span>'; }
+
+    const data = collectForm();
+    try {
+        const res = await fetch('/api/config/test/' + service, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data),
+        });
+        const result = await res.json();
+
+        if (result.connected) {
+            if (statusEl) statusEl.className = 'nav-status connected';
+            if (badgeEl)  badgeEl.innerHTML = '<span class="conn-status ok">&#10003; Connected</span>';
+            toast(service + ' connection successful', 'success');
+        } else {
+            if (statusEl) statusEl.className = 'nav-status error';
+            if (badgeEl)  badgeEl.innerHTML = '<span class="conn-status fail">&#10007; Failed</span>';
+            toast(service + ': ' + result.message, 'error');
+        }
+    } catch (e) {
+        if (statusEl) statusEl.className = 'nav-status error';
+        if (badgeEl)  badgeEl.innerHTML = '<span class="conn-status fail">&#10007; Error</span>';
+        toast('Connection test failed: ' + e.message, 'error');
+    }
+}
+
+// ── YAML Preview ───────────────────────────────────────────────
+function updateYamlPreview() {
+    const data = collectForm();
+    const yaml = configToYaml(data);
+    document.getElementById('yaml-output').textContent = yaml;
+}
+
+function configToYaml(obj, indent) {
+    indent = indent || 0;
+    let out = '';
+    const pad = '  '.repeat(indent);
+    for (const [key, val] of Object.entries(obj)) {
+        if (val === null || val === undefined) {
+            out += pad + key + ': null\n';
+        } else if (Array.isArray(val)) {
+            if (val.length === 0) {
+                out += pad + key + ': []\n';
+            } else {
+                out += pad + key + ':\n';
+                val.forEach(v => { out += pad + '  - "' + String(v).replace(/"/g, '\\"') + '"\n'; });
+            }
+        } else if (typeof val === 'object') {
+            out += pad + key + ':\n';
+            out += configToYaml(val, indent + 1);
+        } else if (typeof val === 'boolean') {
+            out += pad + key + ': ' + val + '\n';
+        } else if (typeof val === 'number') {
+            out += pad + key + ': ' + val + '\n';
+        } else {
+            out += pad + key + ': "' + String(val).replace(/"/g, '\\"') + '"\n';
+        }
+    }
+    return out;
+}
+
+async function copyYaml() {
+    const yaml = document.getElementById('yaml-output').textContent;
+    try {
+        await navigator.clipboard.writeText(yaml);
+        toast('YAML copied to clipboard', 'info');
+    } catch {
+        toast('Copy failed — use Ctrl+A, Ctrl+C', 'warning');
+    }
+}
+
+// ── Toasts ─────────────────────────────────────────────────────
+function toast(message, type) {
+    type = type || 'info';
+    const container = document.getElementById('toasts');
+    const el = document.createElement('div');
+    const icons = { success: '&#10003;', error: '&#10007;', warning: '&#9888;', info: '&#8505;' };
+    el.className = 'toast toast-' + type;
+    el.innerHTML = '<span>' + (icons[type] || '') + '</span> ' + escapeHtml(message);
+    container.appendChild(el);
+    setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .3s'; setTimeout(() => el.remove(), 300); }, 4000);
+}
+
+// ── Init ───────────────────────────────────────────────────────
+loadConfig();
+</script>
+
+</body>
+</html>
