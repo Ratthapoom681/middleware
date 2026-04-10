@@ -12,15 +12,7 @@ services:
       - ./config:/app/config
       # Persist the dedup SQLite database
       - middleware-data:/app/data
-    environment:
-      # Override credentials via environment variables (recommended for production)
-      - WAZUH_BASE_URL=${WAZUH_BASE_URL:-https://wazuh.example.com:55000}
-      - WAZUH_USERNAME=${WAZUH_USERNAME:-wazuh-api-user}
-      - WAZUH_PASSWORD=${WAZUH_PASSWORD:-changeme}
-      - DEFECTDOJO_BASE_URL=${DEFECTDOJO_BASE_URL:-https://defectdojo.example.com/api/v2}
-      - DEFECTDOJO_API_KEY=${DEFECTDOJO_API_KEY:-Token changeme}
-      - REDMINE_BASE_URL=${REDMINE_BASE_URL:-https://redmine.example.com}
-      - REDMINE_API_KEY=${REDMINE_API_KEY:-changeme}
+    # Environment variables removed to allow Web UI config.yaml to take precedence
     # Optional: run in single-cycle mode for testing
     # command: ["--once"]
 
