@@ -8,8 +8,8 @@ services:
     ports:
       - "5000:5000"
     volumes:
-      # Mount config for easy editing without rebuilding
-      - ./config:/app/config:ro
+      # Mount config for easy editing from host and web UI saving
+      - ./config:/app/config
       # Persist the dedup SQLite database
       - middleware-data:/app/data
     environment:
