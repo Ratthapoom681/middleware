@@ -5,6 +5,8 @@ services:
     build: .
     container_name: security-middleware
     restart: unless-stopped
+    ports:
+      - "5000:5000"
     volumes:
       # Mount config for easy editing without rebuilding
       - ./config:/app/config:ro
