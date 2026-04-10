@@ -44,6 +44,15 @@ class WazuhClient:
     def __init__(self, config: WazuhConfig):
         self.config = config
         self.base_url = config.base_url.rstrip("/")
+        
+        # Auto-correct http -> https for the default Wazuh API port
+        if self.base_url.startswith("http://") and ":55000" in self.base_url:
+            self.base_url = self.base_url.replace("http://", "https://")
+            
+        # Ensure it has a scheme
+        if not self.base_url.startswith("http"):
+            self.base_url = "https://" + self.base_url
+
         self.session = requests.Session()
         self.session.verify = config.verify_ssl
         self._token: Optional[str] = None
@@ -72,8 +81,11 @@ class WazuhClient:
             self.session.headers["Authorization"] = f"Bearer {self._token}"
             logger.info("Wazuh: authenticated successfully")
         except RequestException as e:
-            logger.error("Wazuh: authentication failed: %s", e)
-            raise
+            err_msg = str(e)
+            if "RemoteDisconnected" in err_msg or "ConnectionResetError" in err_msg:
+                err_msg += " (Hint: Make sure the Wazuh Base URL starts with 'https://', not 'http://')"
+            logger.error("Wazuh: authentication failed: %s", err_msg)
+            raise RuntimeError(err_msg) from e
 
     def _ensure_auth(self) -> None:
         """Re-authenticate if token is missing or expired."""
