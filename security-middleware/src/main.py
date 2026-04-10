@@ -116,8 +116,18 @@ class MiddlewarePipeline:
             logger.info("No findings to process this cycle")
             return {"ingested": 0, "filtered": 0, "deduplicated": 0, "output": 0}
 
+        return self.process_batch(findings, cycle_start)
+
+    def process_batch(self, findings: list[Finding], cycle_start: datetime = None) -> dict[str, int]:
+        """
+        Process a batch of pre-ingested findings through the pipeline:
+          filter → map → dedup → enrich → output
+        """
+        if not cycle_start:
+            cycle_start = datetime.utcnow()
+            
         total_ingested = len(findings)
-        logger.info("Total ingested: %d findings", total_ingested)
+        logger.info("Processing batch: %d findings", total_ingested)
 
         # --- 2. Filter ---
         logger.info("--- Filtering ---")
@@ -144,7 +154,7 @@ class MiddlewarePipeline:
         # --- Summary ---
         elapsed = (datetime.utcnow() - cycle_start).total_seconds()
         logger.info("=" * 60)
-        logger.info("Pipeline cycle complete in %.1fs", elapsed)
+        logger.info("Pipeline processing complete in %.1fs", elapsed)
         logger.info(
             "  Ingested: %d | After filter: %d | After dedup: %d | "
             "Created: %d | Updated: %d | Failed: %d",
@@ -226,8 +236,16 @@ def main():
         action="store_true",
         help="Run pipeline but don't create Redmine issues (log only)",
     )
+    parser.add_argument("--host", default="0.0.0.0", help="Web UI host to bind to")
+    parser.add_argument("--port", type=int, default=5000, help="Web UI port to listen on")
+    parser.add_argument("--no-web", action="store_true", help="Disable the Web UI and run pipeline only")
+    parser.add_argument("--debug", action="store_true", help="Enable debug logging")
 
     args = parser.parse_args()
+
+    # Set debug level if requested
+    if args.debug:
+        logging.getLogger().setLevel(logging.DEBUG)
 
     # Load configuration
     config = load_config(args.config)
@@ -246,9 +264,20 @@ def main():
     if args.once:
         result = pipeline.run_once()
         logger.info("Result: %s", result)
-    else:
+    elif args.no_web:
+        logger.info("Running pipeline only (Web UI disabled)")
         pipeline.run()
-
+    else:
+        import threading
+        from web.server import app as web_app
+        
+        logger.info("Starting pipeline in background thread...")
+        t = threading.Thread(target=pipeline.run, daemon=True)
+        t.start()
+        
+        logger.info(f"Starting Web UI + Webhook Receiver on http://{args.host}:{args.port}")
+        # Disable use_reloader to avoid double-starting the background thread
+        web_app.run(host=args.host, port=args.port, debug=args.debug, use_reloader=False)
 
 if __name__ == "__main__":
     main()

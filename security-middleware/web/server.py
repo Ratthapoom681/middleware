@@ -17,12 +17,17 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 
+import threading
+
 import yaml
 from flask import Flask, jsonify, request, send_from_directory
 
 # Ensure the project root is on sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.main import MiddlewarePipeline
+from src.sources.wazuh_client import WazuhClient
 
 from src.config import (
     AppConfig,
@@ -186,6 +191,48 @@ def restore_backup(filename: str):
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
+@app.route("/api/webhook/wazuh", methods=["POST"])
+def wazuh_webhook():
+    """
+    Receive alerts directly from Wazuh Integrations (Push Model).
+    Wazuh sends a JSON array (or single object) of rules/alerts.
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"status": "error", "message": "No JSON payload"}), 400
+
+        # Wazuh integrations can send a dict or list
+        if not isinstance(data, list):
+            data = [data]
+
+        # Load current config
+        config = load_config(str(CONFIG_PATH) if CONFIG_PATH.exists() else None)
+        
+        # We need the WazuhClient just to reuse the parser logic
+        wazuh_client = WazuhClient(config.wazuh)
+        
+        findings = []
+        for alert in data:
+            finding = wazuh_client._alert_to_finding(alert)
+            if finding:
+                findings.append(finding)
+
+        if not findings:
+            return jsonify({"status": "ok", "message": "No meaningful alerts found in payload"}), 200
+
+        # Process the batch ad-hoc
+        pipeline = MiddlewarePipeline(config)
+        stats = pipeline.process_batch(findings)
+        pipeline.dedup_stage.close()
+
+        return jsonify({"status": "ok", "stats": stats}), 200
+
+    except Exception as e:
+        logger.exception("Webhook processing failed: %s", e)
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
 # ── Helpers ───────────────────────────────────────────────────────────
 
 def _config_to_dict(config: AppConfig) -> dict:
@@ -267,12 +314,23 @@ def main():
     parser.add_argument("--host", default="0.0.0.0", help="Host to bind to")
     parser.add_argument("--port", type=int, default=5000, help="Port to listen on")
     parser.add_argument("--debug", action="store_true", help="Enable debug mode")
+    parser.add_argument("--background-polling", action="store_true", help="Run background pipeline poller")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO)
-    print(f"\n  Security Middleware Config UI")
-    print(f"  Open http://{args.host}:{args.port} in your browser\n")
-    app.run(host=args.host, port=args.port, debug=args.debug)
+    
+    if args.background_polling:
+        logger.info("Starting background pipeline poller thread...")
+        config = load_config(str(CONFIG_PATH) if CONFIG_PATH.exists() else None)
+        pipeline = MiddlewarePipeline(config)
+        # Daemon thread will die when flask dies
+        t = threading.Thread(target=pipeline.run, daemon=True)
+        t.start()
+
+    print(f"\n  Security Middleware Config UI & Webhook Receiver")
+    print(f"  Open http://{args.host}:{args.port} in your browser")
+    print(f"  Webhook URL: http://{args.host}:{args.port}/api/webhook/wazuh\n")
+    app.run(host=args.host, port=args.port, debug=args.debug, use_reloader=False if args.background_polling else True)
 
 
 if __name__ == "__main__":
