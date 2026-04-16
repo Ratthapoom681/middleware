@@ -140,7 +140,7 @@ class MiddlewarePipeline:
         logger.info("--- Ingesting from Wazuh ---")
         try:
             wazuh_findings = self.wazuh.fetch_alerts(
-                since_minutes=self.config.pipeline.poll_interval // 60 + 1
+                since_minutes=self.config.pipeline.initial_lookback_minutes
             )
             findings.extend(wazuh_findings)
             logger.info("Wazuh: %d alerts ingested", len(wazuh_findings))
@@ -221,9 +221,7 @@ class MiddlewarePipeline:
 
     def run(self) -> None:
         """Run the pipeline in a continuous polling loop."""
-        interval = self.config.pipeline.poll_interval
-
-        logger.info("Starting middleware pipeline (poll interval: %ds)", interval)
+        logger.info("Starting middleware pipeline (poll interval: %ds)", self.config.pipeline.poll_interval)
         self.test_connections()
 
         while not _shutdown:
@@ -236,6 +234,8 @@ class MiddlewarePipeline:
             if _shutdown:
                 break
 
+            # Re-read interval each cycle so config changes take effect
+            interval = self.config.pipeline.poll_interval
             logger.info("Sleeping %d seconds until next cycle...", interval)
             # Sleep in small increments to allow graceful shutdown
             for _ in range(interval):

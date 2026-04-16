@@ -939,6 +939,20 @@
     <!-- ════════════════════════════════════════════════════════ -->
     <div class="section-page" id="page-logging">
         <div class="card">
+            <div class="card-title">Pipeline Polling</div>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>Poll Interval <span class="hint">(seconds — how often to fetch new alerts)</span></label>
+                    <input type="number" id="pipeline-poll_interval" min="10" placeholder="300">
+                </div>
+                <div class="form-group">
+                    <label>Initial Lookback <span class="hint">(minutes — how far back on first poll)</span></label>
+                    <input type="number" id="pipeline-initial_lookback_minutes" min="1" placeholder="1440">
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
             <div class="card-title">Logging Configuration</div>
             <div class="form-grid">
                 <div class="form-group">
@@ -949,10 +963,6 @@
                         <option value="WARNING">WARNING</option>
                         <option value="ERROR">ERROR</option>
                     </select>
-                </div>
-                <div class="form-group">
-                    <label>Poll Interval <span class="hint">(seconds)</span></label>
-                    <input type="number" id="pipeline-poll_interval" min="10" placeholder="300">
                 </div>
                 <div class="form-group full-width">
                     <label>Log Format</label>
@@ -1166,6 +1176,7 @@ function populateForm(c) {
     setVal('logging-level', c.logging?.level);
     setVal('logging-format', c.logging?.format);
     setVal('pipeline-poll_interval', c.pipeline?.poll_interval);
+    setVal('pipeline-initial_lookback_minutes', c.pipeline?.initial_lookback_minutes);
 }
 
 function setVal(id, value) {
@@ -1213,6 +1224,7 @@ function collectForm() {
         },
         pipeline: {
             poll_interval: getInt('pipeline-poll_interval', 300),
+            initial_lookback_minutes: getInt('pipeline-initial_lookback_minutes', 1440),
             filter: {
                 min_severity:           getVal('filter-min_severity'),
                 exclude_rule_ids:       chipData['filter-exclude_rule_ids'] || [],

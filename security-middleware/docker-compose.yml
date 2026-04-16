@@ -11,6 +11,8 @@ services:
       - ./config:/app/config
       # Persist the dedup SQLite database
       - middleware-data:/app/data
+      # Mount Wazuh alerts log for direct file reading
+      - /var/ossec/logs/alerts:/var/ossec/logs/alerts:ro
     # Environment variables removed to allow Web UI config.yaml to take precedence
     # Optional: run in single-cycle mode for testing
     # command: ["--once"]

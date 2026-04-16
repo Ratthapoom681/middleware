@@ -108,23 +108,104 @@ class WazuhClient:
         if not self._token or (self._token_expiry and datetime.now(timezone.utc) >= self._token_expiry):
             self._authenticate()
 
-    # ── Indexer API (alert fetching) ───────────────────────────────────
+    # ── File position tracking for alerts.json ─────────────────────────
+    _file_position: int = 0
+
+    # ── Alert fetching (routes to file or indexer) ─────────────────────
 
     def fetch_alerts(self, since_minutes: int = 5) -> list[Finding]:
         """
-        Fetch recent alerts from the Wazuh Indexer (OpenSearch).
-
-        Queries the wazuh-alerts-* index pattern using OpenSearch Query DSL.
-
-        Args:
-            since_minutes: Look back this many minutes for alerts.
-
-        Returns:
-            List of Finding objects converted from Wazuh alerts.
+        Fetch recent alerts. Routes to file-based or Indexer-based
+        depending on whether alerts_json_path is configured.
         """
-        # On first poll, look back 24 hours to catch existing alerts
+        if self.config.alerts_json_path:
+            return self._fetch_from_file()
+        else:
+            return self._fetch_from_indexer(since_minutes)
+
+    # ── File-based alert reading ───────────────────────────────────────
+
+    def _fetch_from_file(self) -> list[Finding]:
+        """
+        Read new alerts from the Wazuh alerts.json log file.
+        Tracks file position so each call only reads new lines.
+        """
+        import json
+        import os
+
+        path = self.config.alerts_json_path
+        if not os.path.exists(path):
+            logger.error("Wazuh alerts file not found: %s", path)
+            return []
+
+        findings: list[Finding] = []
+        file_size = os.path.getsize(path)
+
+        # If file was rotated (shrunk), reset position
+        if file_size < self._file_position:
+            logger.info("Wazuh alerts file rotated, resetting position")
+            self._file_position = 0
+
+        # On first run, seek to end so we only get new alerts going forward
+        # Set _file_position = 0 initially, then on first call jump to end
         if self._last_poll is None:
-            since = datetime.now(timezone.utc) - timedelta(hours=24)
+            self._file_position = file_size
+            self._last_poll = datetime.now(timezone.utc)
+            logger.info("Wazuh file reader: initialized at position %d (%.1f MB), will read new alerts from now on",
+                        self._file_position, file_size / 1024 / 1024)
+            return []
+
+        if self._file_position >= file_size:
+            logger.info("Wazuh file reader: no new data (position %d)", self._file_position)
+            return []
+
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                f.seek(self._file_position)
+                lines_read = 0
+                parse_errors = 0
+
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    lines_read += 1
+                    try:
+                        alert = json.loads(line)
+                    except json.JSONDecodeError:
+                        parse_errors += 1
+                        continue
+
+                    # Apply min_level filter
+                    rule_level = alert.get("rule", {}).get("level", 0)
+                    if rule_level < self.config.min_level:
+                        continue
+
+                    finding = self._alert_to_finding(alert)
+                    if finding:
+                        findings.append(finding)
+
+                self._file_position = f.tell()
+
+            logger.info("Wazuh file reader: read %d lines, parsed %d alerts (min_level=%d), %d parse errors",
+                        lines_read, len(findings), self.config.min_level, parse_errors)
+
+        except Exception as e:
+            logger.error("Wazuh file reader: failed to read alerts: %s", e)
+
+        self._last_poll = datetime.now(timezone.utc)
+        return findings
+
+    # ── Indexer-based alert fetching ───────────────────────────────────
+
+    def _fetch_from_indexer(self, since_minutes: int = 5) -> list[Finding]:
+        """
+        Fetch recent alerts from the Wazuh Indexer (OpenSearch).
+        """
+        # On first poll, look back by since_minutes to catch existing alerts
+        # On subsequent polls, use the last poll time
+        if self._last_poll is None:
+            since = datetime.now(timezone.utc) - timedelta(minutes=since_minutes)
         else:
             since = self._last_poll
 

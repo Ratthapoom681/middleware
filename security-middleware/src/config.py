@@ -35,6 +35,8 @@ class WazuhConfig:
     indexer_password: str = "admin"
     verify_ssl: bool = False
     min_level: int = 7
+    # Path to Wazuh alerts.json file (if set, reads from file instead of Indexer API)
+    alerts_json_path: str = ""
 
 
 @dataclass
@@ -85,7 +87,8 @@ class EnrichmentConfig:
 
 @dataclass
 class PipelineConfig:
-    poll_interval: int = 300
+    poll_interval: int = 300            # seconds between each poll cycle
+    initial_lookback_minutes: int = 1440  # how far back to look on first poll (default 24h)
     filter: FilterConfig = field(default_factory=FilterConfig)
     dedup: DedupConfig = field(default_factory=DedupConfig)
     enrichment: EnrichmentConfig = field(default_factory=EnrichmentConfig)
