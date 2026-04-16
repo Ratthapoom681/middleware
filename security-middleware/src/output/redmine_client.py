@@ -61,6 +61,12 @@ class RedmineClient:
         # Get formatted description from enrichment, or use raw description
         description = finding.enrichment.get("redmine_description", finding.description)
 
+        # Append raw alert JSON for full data visibility
+        if finding.raw_data:
+            import json
+            raw_json = json.dumps(finding.raw_data, indent=2, default=str, ensure_ascii=False)
+            description += f"\n\n---\n\nh3. Raw Alert Data\n\n<pre>\n{raw_json}\n</pre>\n"
+
         # Build issue payload
         issue_data: dict[str, Any] = {
             "issue": {
