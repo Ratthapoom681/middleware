@@ -28,8 +28,11 @@ DEFAULT_CONFIG_PATHS = [
 @dataclass
 class WazuhConfig:
     base_url: str = "https://localhost:55000"
+    indexer_url: str = "https://localhost:9200"
     username: str = "wazuh"
     password: str = "changeme"
+    indexer_username: str = "admin"
+    indexer_password: str = "admin"
     verify_ssl: bool = False
     min_level: int = 7
 

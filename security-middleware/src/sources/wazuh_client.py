@@ -1,15 +1,18 @@
 """
-Wazuh API client.
+Wazuh client.
 
-Connects to the Wazuh Manager REST API, authenticates via JWT,
-and fetches alerts since the last poll. Each alert is converted
-into a unified Finding object.
+Fetches alerts from the Wazuh Indexer (OpenSearch, port 9200) and
+uses the Wazuh Manager API (port 55000) for connection testing.
+
+Wazuh Architecture:
+  - Manager API (55000): Agent management, configuration, rules — no alerts.
+  - Indexer API (9200):   OpenSearch-based storage of wazuh-alerts-* indices.
 """
 
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 import requests
@@ -39,24 +42,35 @@ def _map_wazuh_level(level: int) -> Severity:
 
 
 class WazuhClient:
-    """Client for the Wazuh Manager REST API."""
+    """Client for the Wazuh Indexer (alerts) and Manager API (connection test)."""
 
     def __init__(self, config: WazuhConfig):
         self.config = config
+
+        # Manager API (for test_connection)
         self.base_url = config.base_url.rstrip("/")
-        
-        # Auto-correct http -> https for the default Wazuh API port
         if self.base_url.startswith("http://") and ":55000" in self.base_url:
             self.base_url = self.base_url.replace("http://", "https://")
-            
-        # Ensure it has a scheme
         if not self.base_url.startswith("http"):
             self.base_url = "https://" + self.base_url
 
+        # Indexer API (for fetching alerts)
+        self.indexer_url = config.indexer_url.rstrip("/")
+        if not self.indexer_url.startswith("http"):
+            self.indexer_url = "https://" + self.indexer_url
+
+        # Session for Manager API (JWT auth)
         self.session = requests.Session()
         self.session.verify = config.verify_ssl
         self._token: Optional[str] = None
         self._token_expiry: Optional[datetime] = None
+
+        # Session for Indexer API (Basic auth)
+        self.indexer_session = requests.Session()
+        self.indexer_session.verify = config.verify_ssl
+        self.indexer_session.auth = (config.indexer_username, config.indexer_password)
+        self.indexer_session.headers["Content-Type"] = "application/json"
+
         self._last_poll: Optional[datetime] = None
 
         # Suppress SSL warnings if verify is disabled
@@ -64,8 +78,10 @@ class WazuhClient:
             import urllib3
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+    # ── Manager API (authentication & test) ────────────────────────────
+
     def _authenticate(self) -> None:
-        """Obtain a JWT token from Wazuh API."""
+        """Obtain a JWT token from Wazuh Manager API."""
         url = f"{self.base_url}/security/user/authenticate"
         try:
             response = self.session.post(
@@ -77,24 +93,28 @@ class WazuhClient:
             data = response.json()
             self._token = data.get("data", {}).get("token", "")
             # Wazuh tokens typically expire in 900s (15 min)
-            self._token_expiry = datetime.utcnow() + timedelta(seconds=850)
+            self._token_expiry = datetime.now(timezone.utc) + timedelta(seconds=850)
             self.session.headers["Authorization"] = f"Bearer {self._token}"
-            logger.info("Wazuh: authenticated successfully")
+            logger.info("Wazuh Manager: authenticated successfully")
         except RequestException as e:
             err_msg = str(e)
             if "RemoteDisconnected" in err_msg or "ConnectionResetError" in err_msg:
                 err_msg += " (Hint: Make sure the Wazuh Base URL starts with 'https://', not 'http://')"
-            logger.error("Wazuh: authentication failed: %s", err_msg)
+            logger.error("Wazuh Manager: authentication failed: %s", err_msg)
             raise RuntimeError(err_msg) from e
 
     def _ensure_auth(self) -> None:
         """Re-authenticate if token is missing or expired."""
-        if not self._token or (self._token_expiry and datetime.utcnow() >= self._token_expiry):
+        if not self._token or (self._token_expiry and datetime.now(timezone.utc) >= self._token_expiry):
             self._authenticate()
+
+    # ── Indexer API (alert fetching) ───────────────────────────────────
 
     def fetch_alerts(self, since_minutes: int = 5) -> list[Finding]:
         """
-        Fetch recent alerts from Wazuh.
+        Fetch recent alerts from the Wazuh Indexer (OpenSearch).
+
+        Queries the wazuh-alerts-* index pattern using OpenSearch Query DSL.
 
         Args:
             since_minutes: Look back this many minutes for alerts.
@@ -102,42 +122,51 @@ class WazuhClient:
         Returns:
             List of Finding objects converted from Wazuh alerts.
         """
-        self._ensure_auth()
+        since = self._last_poll or (datetime.now(timezone.utc) - timedelta(minutes=since_minutes))
+        since_str = since.strftime("%Y-%m-%dT%H:%M:%S+00:00")
 
-        # Build time filter
-        since = self._last_poll or (datetime.utcnow() - timedelta(minutes=since_minutes))
-        since_str = since.strftime("%Y-%m-%dT%H:%M:%S+0000")
+        url = f"{self.indexer_url}/wazuh-alerts-*/_search"
 
-        url = f"{self.base_url}/alerts"
-        params = {
-            "limit": 500,
-            "sort": "-timestamp",
-            "q": f"timestamp>{since_str}",
+        # Build OpenSearch query
+        query_body: dict[str, Any] = {
+            "size": 500,
+            "sort": [{"timestamp": {"order": "desc"}}],
+            "query": {
+                "bool": {
+                    "must": [
+                        {"range": {"timestamp": {"gte": since_str}}},
+                    ]
+                }
+            }
         }
 
-        # Filter by minimum level
+        # Add minimum rule level filter
         if self.config.min_level > 0:
-            params["q"] += f";rule.level>={self.config.min_level}"
+            query_body["query"]["bool"]["must"].append(
+                {"range": {"rule.level": {"gte": self.config.min_level}}}
+            )
 
         findings: list[Finding] = []
 
         try:
-            response = self.session.get(url, params=params, timeout=60)
+            response = self.indexer_session.post(url, json=query_body, timeout=60)
             response.raise_for_status()
             data = response.json()
 
-            alerts = data.get("data", {}).get("affected_items", [])
-            logger.info("Wazuh: fetched %d alerts", len(alerts))
+            hits = data.get("hits", {}).get("hits", [])
+            logger.info("Wazuh Indexer: fetched %d alerts", len(hits))
 
-            for alert in alerts:
+            for hit in hits:
+                alert = hit.get("_source", {})
+                alert["_id"] = hit.get("_id", "")
                 finding = self._alert_to_finding(alert)
                 if finding:
                     findings.append(finding)
 
-            self._last_poll = datetime.utcnow()
+            self._last_poll = datetime.now(timezone.utc)
 
         except RequestException as e:
-            logger.error("Wazuh: failed to fetch alerts: %s", e)
+            logger.error("Wazuh Indexer: failed to fetch alerts: %s", e)
 
         return findings
 
@@ -177,7 +206,7 @@ class WazuhClient:
             try:
                 timestamp = datetime.fromisoformat(timestamp_str.replace("+0000", "+00:00"))
             except (ValueError, AttributeError):
-                timestamp = datetime.utcnow()
+                timestamp = datetime.now(timezone.utc)
 
             return Finding(
                 source=FindingSource.WAZUH,
@@ -200,8 +229,9 @@ class WazuhClient:
             return None
 
     def test_connection(self) -> bool:
-        """Test connectivity to the Wazuh API."""
+        """Test connectivity to the Wazuh Manager API and Indexer."""
         try:
+            # Test Manager API
             self._authenticate()
             response = self.session.get(
                 f"{self.base_url}/manager/info",
@@ -210,10 +240,21 @@ class WazuhClient:
             response.raise_for_status()
             info = response.json().get("data", {}).get("affected_items", [{}])[0]
             logger.info(
-                "Wazuh: connected — version %s, node %s",
+                "Wazuh Manager: connected — version %s, node %s",
                 info.get("version", "?"),
                 info.get("node_name", "?"),
             )
+
+            # Test Indexer
+            idx_resp = self.indexer_session.get(self.indexer_url, timeout=10)
+            idx_resp.raise_for_status()
+            idx_info = idx_resp.json()
+            logger.info(
+                "Wazuh Indexer: connected — cluster %s, version %s",
+                idx_info.get("cluster_name", "?"),
+                idx_info.get("version", {}).get("number", "?"),
+            )
+
             return True
         except Exception as e:
             logger.error("Wazuh: connection test failed: %s", e)

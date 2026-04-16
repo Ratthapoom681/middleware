@@ -4,9 +4,14 @@
 
 # --- Wazuh SIEM ---
 wazuh:
+  # Manager API (for connection test / agent management)
   base_url: "https://host.docker.internal:55000"
   username: "wazuh-api-user"
   password: "changeme"
+  # Indexer API (OpenSearch — where alerts are stored)
+  indexer_url: "https://host.docker.internal:9200"
+  indexer_username: "admin"
+  indexer_password: "admin"
   verify_ssl: false
   # Only fetch alerts with level >= this value (0-15)
   min_level: 7
