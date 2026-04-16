@@ -649,21 +649,41 @@
     <div class="section-page active" id="page-wazuh">
         <div class="card">
             <div class="card-title">
-                Connection <span class="badge badge-blue">API v4</span>
+                Connection (Manager API) <span class="badge badge-blue">API v4</span>
                 <span style="margin-left:auto" id="conn-badge-wazuh"></span>
             </div>
             <div class="form-grid">
                 <div class="form-group full-width">
-                    <label>Base URL</label>
-                    <input type="url" id="wazuh-base_url" placeholder="https://wazuh-manager:55000">
+                    <label>Manager Base URL <span class="hint">(For test info & agent control)</span></label>
+                    <input type="url" id="wazuh-base_url" placeholder="https://host.docker.internal:55000">
                 </div>
                 <div class="form-group">
-                    <label>Username</label>
+                    <label>Manager Username</label>
                     <input type="text" id="wazuh-username" placeholder="wazuh-api-user">
                 </div>
                 <div class="form-group">
-                    <label>Password</label>
+                    <label>Manager Password</label>
                     <input type="password" id="wazuh-password" placeholder="********">
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">
+                Connection (Indexer API) <span class="badge badge-orange">OpenSearch</span>
+            </div>
+            <div class="form-grid">
+                <div class="form-group full-width">
+                    <label>Indexer URL <span class="hint">(For fetching alerts)</span></label>
+                    <input type="url" id="wazuh-indexer_url" placeholder="https://host.docker.internal:9200">
+                </div>
+                <div class="form-group">
+                    <label>Indexer Username</label>
+                    <input type="text" id="wazuh-indexer_username" placeholder="admin">
+                </div>
+                <div class="form-group">
+                    <label>Indexer Password</label>
+                    <input type="password" id="wazuh-indexer_password" placeholder="********">
                 </div>
             </div>
         </div>
@@ -1100,6 +1120,9 @@ function populateForm(c) {
     setVal('wazuh-base_url', c.wazuh?.base_url);
     setVal('wazuh-username', c.wazuh?.username);
     setVal('wazuh-password', c.wazuh?.password);
+    setVal('wazuh-indexer_url', c.wazuh?.indexer_url);
+    setVal('wazuh-indexer_username', c.wazuh?.indexer_username);
+    setVal('wazuh-indexer_password', c.wazuh?.indexer_password);
     setVal('wazuh-min_level', c.wazuh?.min_level);
     setChecked('wazuh-verify_ssl', c.wazuh?.verify_ssl);
 
@@ -1158,11 +1181,14 @@ function setChecked(id, value) {
 function collectForm() {
     return {
         wazuh: {
-            base_url:   getVal('wazuh-base_url'),
-            username:   getVal('wazuh-username'),
-            password:   getVal('wazuh-password'),
-            verify_ssl: getChecked('wazuh-verify_ssl'),
-            min_level:  getInt('wazuh-min_level', 7),
+            base_url:         getVal('wazuh-base_url'),
+            username:         getVal('wazuh-username'),
+            password:         getVal('wazuh-password'),
+            indexer_url:      getVal('wazuh-indexer_url'),
+            indexer_username: getVal('wazuh-indexer_username'),
+            indexer_password: getVal('wazuh-indexer_password'),
+            verify_ssl:       getChecked('wazuh-verify_ssl'),
+            min_level:        getInt('wazuh-min_level', 7),
         },
         defectdojo: {
             base_url:        getVal('defectdojo-base_url'),
