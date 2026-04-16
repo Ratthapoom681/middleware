@@ -4,7 +4,7 @@
 
 # --- Wazuh SIEM ---
 wazuh:
-  base_url: "https://wazuh.example.com:55000"
+  base_url: "https://host.docker.internal:55000"
   username: "wazuh-api-user"
   password: "changeme"
   verify_ssl: false
