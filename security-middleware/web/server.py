@@ -112,6 +112,47 @@ def save_config():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
+@app.route("/api/config/raw", methods=["GET"])
+def get_config_raw():
+    """Return the raw config.yaml text."""
+    try:
+        content = ""
+        if CONFIG_PATH.exists():
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                content = f.read()
+        return jsonify({"status": "ok", "content": content})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route("/api/config/raw", methods=["POST"])
+def save_config_raw():
+    """Save raw YAML text directly to config.yaml."""
+    try:
+        yaml_content = request.get_data(as_text=True)
+        # Validate that it's parseable YAML
+        data = yaml.safe_load(yaml_content)
+        # Validate schema
+        _build_config(data or {})
+
+        # Create backup
+        if CONFIG_PATH.exists():
+            BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+            import shutil
+            from datetime import datetime, timezone
+            ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_raw")
+            shutil.copy2(CONFIG_PATH, BACKUP_DIR / f"config_{ts}.yaml")
+
+        # Write YAML directly
+        CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+            f.write(yaml_content)
+
+        return jsonify({"status": "ok", "message": "Raw YAML saved successfully"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 400
+
+
 @app.route("/api/config/validate", methods=["POST"])
 def validate_config():
     """Validate config without saving."""

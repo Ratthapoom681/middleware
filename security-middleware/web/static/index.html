@@ -963,17 +963,18 @@
     </div>
 
     <!-- ════════════════════════════════════════════════════════ -->
-    <!--                  YAML PREVIEW                           -->
+    <!--                  DIRECT YAML EDITOR                     -->
     <!-- ════════════════════════════════════════════════════════ -->
     <div class="section-page" id="page-preview">
         <div class="card">
             <div class="card-title">
-                Generated YAML
-                <span style="margin-left:auto">
-                    <button class="btn btn-sm" onclick="copyYaml()">Copy</button>
+                Direct YAML Editor
+                <span style="margin-left:auto; display:flex; gap:10px;">
+                    <button class="btn btn-sm" onclick="loadRawYaml()">&#8635; Load File</button>
+                    <button class="btn btn-sm btn-primary" onclick="saveRawYaml()">&#10003; Save Raw</button>
                 </span>
             </div>
-            <pre class="yaml-preview" id="yaml-output"></pre>
+            <textarea class="yaml-preview" id="yaml-output" spellcheck="false" style="width:100%; height:500px; resize:vertical; background:var(--bg-input); color:var(--text-primary);"></textarea>
         </div>
     </div>
 
@@ -1294,49 +1295,44 @@ async function testConnection(service) {
     }
 }
 
-// ── YAML Preview ───────────────────────────────────────────────
-function updateYamlPreview() {
-    const data = collectForm();
-    const yaml = configToYaml(data);
-    document.getElementById('yaml-output').textContent = yaml;
-}
-
-function configToYaml(obj, indent) {
-    indent = indent || 0;
-    let out = '';
-    const pad = '  '.repeat(indent);
-    for (const [key, val] of Object.entries(obj)) {
-        if (val === null || val === undefined) {
-            out += pad + key + ': null\n';
-        } else if (Array.isArray(val)) {
-            if (val.length === 0) {
-                out += pad + key + ': []\n';
-            } else {
-                out += pad + key + ':\n';
-                val.forEach(v => { out += pad + '  - "' + String(v).replace(/"/g, '\\"') + '"\n'; });
-            }
-        } else if (typeof val === 'object') {
-            out += pad + key + ':\n';
-            out += configToYaml(val, indent + 1);
-        } else if (typeof val === 'boolean') {
-            out += pad + key + ': ' + val + '\n';
-        } else if (typeof val === 'number') {
-            out += pad + key + ': ' + val + '\n';
-        } else {
-            out += pad + key + ': "' + String(val).replace(/"/g, '\\"') + '"\n';
-        }
-    }
-    return out;
-}
-
-async function copyYaml() {
-    const yaml = document.getElementById('yaml-output').textContent;
+// ── YAML Editor ───────────────────────────────────────────────
+async function loadRawYaml() {
     try {
-        await navigator.clipboard.writeText(yaml);
-        toast('YAML copied to clipboard', 'info');
-    } catch {
-        toast('Copy failed — use Ctrl+A, Ctrl+C', 'warning');
+        const res = await fetch('/api/config/raw');
+        const data = await res.json();
+        if (data.status === 'ok') {
+            document.getElementById('yaml-output').value = data.content;
+            toast('Loaded raw YAML from file', 'success');
+        } else throw new Error(data.message);
+    } catch (e) {
+        toast('Failed to load raw YAML: ' + e.message, 'error');
     }
+}
+
+async function saveRawYaml() {
+    const yamlContent = document.getElementById('yaml-output').value;
+    try {
+        const res = await fetch('/api/config/raw', {
+            method: 'POST',
+            headers: {'Content-Type': 'text/plain'},
+            body: yamlContent
+        });
+        const result = await res.json();
+        if (result.status === 'ok') {
+            toast('Raw YAML saved successfully', 'success');
+            // Refresh form view
+            loadConfig();
+        } else {
+            toast('Save failed: ' + result.message, 'error');
+        }
+    } catch (e) {
+        toast('Save failed: ' + e.message, 'error');
+    }
+}
+
+function updateYamlPreview() {
+    // When activating the tab, load the contents from file so it's fresh
+    loadRawYaml();
 }
 
 // ── Toasts ─────────────────────────────────────────────────────

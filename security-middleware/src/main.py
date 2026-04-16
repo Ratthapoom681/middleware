@@ -50,8 +50,10 @@ class MiddlewarePipeline:
     Orchestrates the full ingestion → processing → output pipeline.
     """
 
-    def __init__(self, config: AppConfig):
+    def __init__(self, config: AppConfig, config_path: str = None):
         self.config = config
+        self.config_path = config_path or "config/config.yaml"
+        self._last_config_mtime = self._get_config_mtime()
 
         # Source clients
         self.wazuh = WazuhClient(config.wazuh)
@@ -65,6 +67,41 @@ class MiddlewarePipeline:
 
         # Output
         self.redmine = RedmineClient(config.redmine)
+
+    def _get_config_mtime(self) -> float:
+        import os
+        try:
+            return os.path.getmtime(self.config_path)
+        except OSError:
+            return 0.0
+
+    def check_config_reload(self) -> None:
+        """Check if the config file has been modified on disk and reload if necessary."""
+        current_mtime = self._get_config_mtime()
+        if current_mtime > self._last_config_mtime:
+            logger.info("Config file modification detected! Reloading pipeline components...")
+            self._last_config_mtime = current_mtime
+            try:
+                from src.config import load_config
+                self.config = load_config(self.config_path)
+                
+                # Re-initialize all clients with new config
+                self.wazuh = WazuhClient(self.config.wazuh)
+                self.defectdojo = DefectDojoClient(self.config.defectdojo)
+                self.filter_stage = FilterStage(self.config.pipeline.filter)
+                self.severity_mapper = SeverityMapperStage(self.config.redmine.priority_map)
+                
+                # Gracefully close old dedup DB connection
+                if hasattr(self, 'dedup_stage'):
+                    self.dedup_stage.close()
+                self.dedup_stage = DeduplicatorStage(self.config.pipeline.dedup)
+                
+                self.enricher = EnricherStage(self.config.pipeline.enrichment)
+                self.redmine = RedmineClient(self.config.redmine)
+                logger.info("Pipeline components reloaded successfully.")
+                self.test_connections()
+            except Exception as e:
+                logger.error("Failed to reload configuration: %s", e)
 
     def test_connections(self) -> bool:
         """Test connectivity to all external services."""
@@ -191,6 +228,7 @@ class MiddlewarePipeline:
 
         while not _shutdown:
             try:
+                self.check_config_reload()
                 self.run_cycle()
             except Exception as e:
                 logger.exception("Pipeline cycle failed: %s", e)
@@ -261,7 +299,7 @@ def main():
     signal.signal(signal.SIGTERM, _signal_handler)
 
     # Create pipeline
-    pipeline = MiddlewarePipeline(config)
+    pipeline = MiddlewarePipeline(config, config_path=args.config)
 
     if args.test:
         success = pipeline.test_connections()
