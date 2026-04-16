@@ -54,7 +54,7 @@ class DeduplicatorStage:
         db_path = Path(self.config.db_path)
         db_path.parent.mkdir(parents=True, exist_ok=True)
 
-        self._conn = sqlite3.connect(str(db_path))
+        self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
         self._conn.executescript(_SCHEMA)
         self._conn.commit()
         logger.info("Deduplicator: database initialized at %s", db_path)
