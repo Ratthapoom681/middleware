@@ -122,19 +122,24 @@ class WazuhClient:
         Returns:
             List of Finding objects converted from Wazuh alerts.
         """
-        since = self._last_poll or (datetime.now(timezone.utc) - timedelta(minutes=since_minutes))
+        # On first poll, look back 24 hours to catch existing alerts
+        if self._last_poll is None:
+            since = datetime.now(timezone.utc) - timedelta(hours=24)
+        else:
+            since = self._last_poll
+
         since_str = since.strftime("%Y-%m-%dT%H:%M:%S+00:00")
 
         url = f"{self.indexer_url}/wazuh-alerts-*/_search"
 
-        # Build OpenSearch query
+        # Build OpenSearch query — Wazuh uses @timestamp (ELK convention)
         query_body: dict[str, Any] = {
             "size": 500,
-            "sort": [{"timestamp": {"order": "desc"}}],
+            "sort": [{"@timestamp": {"order": "desc"}}],
             "query": {
                 "bool": {
                     "must": [
-                        {"range": {"timestamp": {"gte": since_str}}},
+                        {"range": {"@timestamp": {"gte": since_str}}},
                     ]
                 }
             }
@@ -146,6 +151,9 @@ class WazuhClient:
                 {"range": {"rule.level": {"gte": self.config.min_level}}}
             )
 
+        logger.info("Wazuh Indexer: querying since=%s, min_level=%d", since_str, self.config.min_level)
+        logger.debug("Wazuh Indexer: query body: %s", query_body)
+
         findings: list[Finding] = []
 
         try:
@@ -153,8 +161,9 @@ class WazuhClient:
             response.raise_for_status()
             data = response.json()
 
+            total = data.get("hits", {}).get("total", {})
             hits = data.get("hits", {}).get("hits", [])
-            logger.info("Wazuh Indexer: fetched %d alerts", len(hits))
+            logger.info("Wazuh Indexer: total matching=%s, returned=%d", total, len(hits))
 
             for hit in hits:
                 alert = hit.get("_source", {})
@@ -201,10 +210,10 @@ class WazuhClient:
                 if mitre.get("id"):
                     description_parts.append(f"**MITRE ATT&CK:** {', '.join(mitre['id'])}")
 
-            # Parse timestamp
-            timestamp_str = alert.get("timestamp", "")
+            # Parse timestamp — Wazuh Indexer uses @timestamp
+            timestamp_str = alert.get("@timestamp", alert.get("timestamp", ""))
             try:
-                timestamp = datetime.fromisoformat(timestamp_str.replace("+0000", "+00:00"))
+                timestamp = datetime.fromisoformat(timestamp_str.replace("+0000", "+00:00").replace("Z", "+00:00"))
             except (ValueError, AttributeError):
                 timestamp = datetime.now(timezone.utc)
 
