@@ -200,7 +200,8 @@ class WazuhClient:
 
     def _fetch_from_indexer(self, since_minutes: int = 5) -> list[Finding]:
         """
-        Fetch recent alerts from the Wazuh Indexer (OpenSearch).
+        Fetch ALL recent alerts from the Wazuh Indexer (OpenSearch).
+        Uses search_after pagination to handle large result sets.
         """
         # On first poll, look back by since_minutes to catch existing alerts
         # On subsequent polls, use the last poll time
@@ -212,11 +213,15 @@ class WazuhClient:
         since_str = since.strftime("%Y-%m-%dT%H:%M:%S+00:00")
 
         url = f"{self.indexer_url}/wazuh-alerts-*/_search"
+        page_size = 1000
 
         # Build OpenSearch query — Wazuh uses @timestamp (ELK convention)
         query_body: dict[str, Any] = {
-            "size": 500,
-            "sort": [{"@timestamp": {"order": "desc"}}],
+            "size": page_size,
+            "sort": [
+                {"@timestamp": {"order": "asc"}},
+                {"_id": {"order": "asc"}},
+            ],
             "query": {
                 "bool": {
                     "must": [
@@ -233,25 +238,47 @@ class WazuhClient:
             )
 
         logger.info("Wazuh Indexer: querying since=%s, min_level=%d", since_str, self.config.min_level)
-        logger.debug("Wazuh Indexer: query body: %s", query_body)
 
         findings: list[Finding] = []
+        total_hits = 0
+        page = 0
 
         try:
-            response = self.indexer_session.post(url, json=query_body, timeout=60)
-            response.raise_for_status()
-            data = response.json()
+            while True:
+                page += 1
+                response = self.indexer_session.post(url, json=query_body, timeout=60)
+                response.raise_for_status()
+                data = response.json()
 
-            total = data.get("hits", {}).get("total", {})
-            hits = data.get("hits", {}).get("hits", [])
-            logger.info("Wazuh Indexer: total matching=%s, returned=%d", total, len(hits))
+                total_info = data.get("hits", {}).get("total", {})
+                hits = data.get("hits", {}).get("hits", [])
 
-            for hit in hits:
-                alert = hit.get("_source", {})
-                alert["_id"] = hit.get("_id", "")
-                finding = self._alert_to_finding(alert)
-                if finding:
-                    findings.append(finding)
+                if page == 1:
+                    total_count = total_info.get("value", 0) if isinstance(total_info, dict) else total_info
+                    logger.info("Wazuh Indexer: total matching=%s, fetching all pages...", total_count)
+
+                if not hits:
+                    break
+
+                total_hits += len(hits)
+
+                for hit in hits:
+                    alert = hit.get("_source", {})
+                    alert["_id"] = hit.get("_id", "")
+                    finding = self._alert_to_finding(alert)
+                    if finding:
+                        findings.append(finding)
+
+                # If we got fewer than page_size, we're done
+                if len(hits) < page_size:
+                    break
+
+                # Use search_after with the sort values from the last hit
+                last_hit = hits[-1]
+                query_body["search_after"] = last_hit.get("sort")
+
+            logger.info("Wazuh Indexer: fetched %d total hits across %d pages, parsed %d findings",
+                        total_hits, page, len(findings))
 
             self._last_poll = datetime.now(timezone.utc)
 

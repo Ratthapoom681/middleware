@@ -20,6 +20,7 @@ wazuh:
 
 # --- DefectDojo Vulnerability Management ---
 defectdojo:
+  enabled: true
   base_url: "https://defectdojo.example.com/api/v2"
   api_key: "Token changeme"
   verify_ssl: true

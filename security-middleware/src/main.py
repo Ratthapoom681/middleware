@@ -147,13 +147,16 @@ class MiddlewarePipeline:
         except Exception as e:
             logger.error("Wazuh ingestion failed: %s", e)
 
-        logger.info("--- Ingesting from DefectDojo ---")
-        try:
-            dd_findings = self.defectdojo.fetch_findings()
-            findings.extend(dd_findings)
-            logger.info("DefectDojo: %d findings ingested", len(dd_findings))
-        except Exception as e:
-            logger.error("DefectDojo ingestion failed: %s", e)
+        if self.config.defectdojo.enabled:
+            logger.info("--- Ingesting from DefectDojo ---")
+            try:
+                dd_findings = self.defectdojo.fetch_findings()
+                findings.extend(dd_findings)
+                logger.info("DefectDojo: %d findings ingested", len(dd_findings))
+            except Exception as e:
+                logger.error("DefectDojo ingestion failed: %s", e)
+        else:
+            logger.debug("DefectDojo: disabled, skipping")
 
         if not findings:
             logger.info("No findings to process this cycle")

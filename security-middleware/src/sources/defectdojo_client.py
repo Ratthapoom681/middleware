@@ -71,7 +71,24 @@ class DefectDojoClient:
             while True:
                 response = self.session.get(url, params=params, timeout=60)
                 response.raise_for_status()
-                data = response.json()
+
+                # Check if response is actually JSON
+                content_type = response.headers.get("Content-Type", "")
+                if "application/json" not in content_type:
+                    logger.error(
+                        "DefectDojo: expected JSON but got '%s'. Response body (first 500 chars): %s",
+                        content_type, response.text[:500]
+                    )
+                    break
+
+                try:
+                    data = response.json()
+                except ValueError as e:
+                    logger.error(
+                        "DefectDojo: failed to parse JSON. Response (first 500 chars): %s",
+                        response.text[:500]
+                    )
+                    break
 
                 results = data.get("results", [])
                 logger.info(

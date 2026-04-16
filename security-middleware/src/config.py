@@ -41,6 +41,7 @@ class WazuhConfig:
 
 @dataclass
 class DefectDojoConfig:
+    enabled: bool = False
     base_url: str = "https://localhost:8080/api/v2"
     api_key: str = "Token changeme"
     verify_ssl: bool = True
