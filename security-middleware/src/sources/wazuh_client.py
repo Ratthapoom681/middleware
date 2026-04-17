@@ -327,6 +327,7 @@ class WazuhClient:
 
             # Priority: data.devname > data.devid > agent.name > agent.ip
             host_name = data.get("devname") or data.get("devid") or agent.get("name") or agent.get("ip") or "unknown"
+            routing_key = data.get("devname", "")
 
             return Finding(
                 source=FindingSource.WAZUH,
@@ -336,6 +337,7 @@ class WazuhClient:
                 severity=severity,
                 raw_severity=str(level),
                 host=host_name,
+                routing_key=routing_key,
                 cve_ids=list(set(cve_ids)),
                 tags=rule.get("groups", []),
                 timestamp=timestamp,

@@ -153,6 +153,57 @@ def save_config_raw():
         return jsonify({"status": "error", "message": str(e)}), 400
 
 
+@app.route("/api/config/backups", methods=["GET"])
+def get_backups():
+    """Return a list of available configuration backups."""
+    try:
+        backups = []
+        if BACKUP_DIR.exists() and BACKUP_DIR.is_dir():
+            for f in BACKUP_DIR.glob("*.yaml"):
+                stat = f.stat()
+                backups.append({
+                    "filename": f.name,
+                    "timestamp": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
+                    "size": stat.st_size
+                })
+        # Sort newest first
+        backups.sort(key=lambda x: x["timestamp"], reverse=True)
+        return jsonify({"status": "ok", "backups": backups})
+    except Exception as e:
+        logger.exception("Error listing backups")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route("/api/config/backups/restore/<filename>", methods=["POST"])
+def restore_backup(filename: str):
+    """Restore a specific backup over the active config."""
+    try:
+        # Basic sanitization
+        if "/" in filename or "\\" in filename or ".." in filename:
+            return jsonify({"status": "error", "message": "Invalid filename"}), 400
+            
+        backup_path = BACKUP_DIR / filename
+        if not backup_path.exists() or not backup_path.is_file():
+            return jsonify({"status": "error", "message": "Backup not found"}), 404
+
+        import shutil
+        # Create a pre-restore safety backup of current config if it exists
+        if CONFIG_PATH.exists():
+            BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+            ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_prerestore")
+            shutil.copy2(CONFIG_PATH, BACKUP_DIR / f"config_{ts}.yaml")
+
+        # Perform the actual restore
+        CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(backup_path, CONFIG_PATH)
+        
+        logger.info("Restored configuration from %s", backup_path)
+        return jsonify({"status": "ok", "message": f"Successfully restored {filename}"})
+    except Exception as e:
+        logger.exception("Failed to restore backup")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
 @app.route("/api/config/validate", methods=["POST"])
 def validate_config():
     """Validate config without saving."""
@@ -204,6 +255,29 @@ def test_connection(service: str):
             "connected": False,
             "message": str(e),
         }), 500
+
+
+@app.route("/api/redmine/trackers", methods=["POST"])
+def fetch_redmine_trackers():
+    """Fetch available tracking scopes directly from Redmine."""
+    try:
+        data = request.get_json() or {}
+        config = _build_config(data)
+
+        from src.output.redmine_client import RedmineClient
+        client = RedmineClient(config.redmine)
+        trackers = client.get_trackers()
+
+        if not trackers:
+             return jsonify({
+                 "status": "error", 
+                 "message": "Failed to authenticate or zero trackers found. Ensure token and URL are valid."
+             }), 400
+
+        return jsonify({"status": "ok", "trackers": trackers})
+    except Exception as e:
+        logger.exception("Redmine tracker synchronization failed")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 @app.route("/api/config/backups", methods=["GET"])

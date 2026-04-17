@@ -89,6 +89,7 @@ class Finding:
 
     # --- Context ---
     host: str = ""                          # Affected hostname or IP
+    routing_key: str = ""                   # Key for routing rules (e.g. devname)
     cvss: Optional[float] = None           # CVSS score if available
     cve_ids: list[str] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
@@ -146,6 +147,7 @@ class Finding:
             "severity": self.severity.value,
             "raw_severity": self.raw_severity,
             "host": self.host,
+            "routing_key": self.routing_key,
             "cvss": self.cvss,
             "cve_ids": self.cve_ids,
             "tags": self.tags,

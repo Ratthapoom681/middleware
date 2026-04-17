@@ -49,6 +49,17 @@ class DefectDojoConfig:
 
 
 @dataclass
+class RedmineRoutingRule:
+    enabled: bool = True
+    source: str = "wazuh"   # "wazuh", "defectdojo", "any"
+    match_type: str = "exact"   # exact, prefix, regex
+    match_value: str = ""
+    tracker_id: Optional[int] = None
+    use_parent: bool = False
+    parent_tracker_id: Optional[int] = None
+
+
+@dataclass
 class RedmineConfig:
     base_url: str = "https://localhost:3000"
     api_key: str = "changeme"
@@ -57,6 +68,7 @@ class RedmineConfig:
     enable_parent_issues: bool = False
     parent_tracker_id: Optional[int] = None
     dedup_custom_field_id: Optional[int] = None
+    routing_rules: list[RedmineRoutingRule] = field(default_factory=list)
     priority_map: dict[str, int] = field(default_factory=lambda: {
         "critical": 5,
         "high": 4,
@@ -152,7 +164,24 @@ def _build_config(raw: dict[str, Any]) -> AppConfig:
     """Build typed AppConfig from raw dictionary."""
     wazuh = WazuhConfig(**raw.get("wazuh", {}))
     defectdojo = DefectDojoConfig(**raw.get("defectdojo", {}))
-    redmine = RedmineConfig(**raw.get("redmine", {}))
+    redmine_raw = raw.get("redmine", {})
+    # Instantiate routing rules explicitly if present
+    rules_raw = redmine_raw.get("routing_rules", [])
+    routing_rules = [RedmineRoutingRule(**r) for r in rules_raw] if rules_raw else []
+    
+    redmine = RedmineConfig(
+        base_url=redmine_raw.get("base_url", "https://localhost:3000"),
+        api_key=redmine_raw.get("api_key", "changeme"),
+        project_id=redmine_raw.get("project_id", "security-incidents"),
+        tracker_id=redmine_raw.get("tracker_id", 1),
+        enable_parent_issues=redmine_raw.get("enable_parent_issues", False),
+        parent_tracker_id=redmine_raw.get("parent_tracker_id"),
+        dedup_custom_field_id=redmine_raw.get("dedup_custom_field_id"),
+        priority_map=redmine_raw.get("priority_map", {
+            "critical": 5, "high": 4, "medium": 3, "low": 2, "info": 1
+        }),
+        routing_rules=routing_rules
+    )
 
     pipeline_raw = raw.get("pipeline", {})
     pipeline = PipelineConfig(
@@ -201,16 +230,43 @@ def load_config(config_path: Optional[str] = None) -> AppConfig:
                 break
 
     raw: dict[str, Any] = {}
+    loaded_successfully = False
+
     if path and path.exists():
         logger.info("Loading config from: %s", path)
-        with open(path, "r", encoding="utf-8") as f:
-            raw = yaml.safe_load(f) or {}
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                raw = yaml.safe_load(f) or {}
+                loaded_successfully = True
+        except yaml.YAMLError as e:
+            logger.error("Failed to parse config file '%s': %s", path, e)
     else:
-        logger.warning("No config file found, using defaults + env vars")
+        logger.warning("No regular config file found.")
+
+    # Fallback to backups if primary is missing or invalid (and not explicitly passed via CLI)
+    if not loaded_successfully and not config_path:
+        backup_dir = Path("config/backups")
+        if backup_dir.exists() and backup_dir.is_dir():
+            backups = list(backup_dir.glob("*.yaml"))
+            if backups:
+                # Sort by last modified time descending
+                backups.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+                backup_path = backups[0]
+                logger.warning("Falling back to most recent backup config: %s", backup_path)
+                try:
+                    with open(backup_path, "r", encoding="utf-8") as f:
+                        raw = yaml.safe_load(f) or {}
+                        path = backup_path
+                        loaded_successfully = True
+                except yaml.YAMLError as e:
+                    logger.error("Fallback backup config also failed to parse: %s", e)
+
+    if not loaded_successfully:
+        logger.warning("No loadable configuration found, using defaults + env vars")
 
     raw = _apply_env_overrides(raw)
     config = _build_config(raw)
-    if path:
+    if path and loaded_successfully:
         config._loaded_path = str(path)
 
     # Setup logging

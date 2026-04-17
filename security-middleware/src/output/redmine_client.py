@@ -75,8 +75,8 @@ class RedmineClient:
         issue_data: dict[str, Any] = {
             "issue": {
                 "project_id": self.config.project_id,
-                "tracker_id": self.config.tracker_id,
-                "subject": subject,
+                "tracker_id": tracker_id,
+                "subject": f"[{finding.severity.value.upper()}] {finding.title}"[:255],
                 "description": description,
                 "priority_id": finding.enrichment.get(
                     "redmine_priority_id",
@@ -85,11 +85,8 @@ class RedmineClient:
             }
         }
 
-        # Add parent issue ID if enabled and host is known
-        if self.config.enable_parent_issues and finding.host:
-            parent_id = self._get_or_create_parent_issue(finding)
-            if parent_id:
-                issue_data["issue"]["parent_issue_id"] = parent_id
+        if parent_id:
+            issue_data["issue"]["parent_issue_id"] = parent_id
 
         # Add dedup hash as custom field if configured
         if self.config.dedup_custom_field_id:
@@ -101,20 +98,14 @@ class RedmineClient:
             ]
 
         try:
-            response = self.session.post(url, json=issue_data, timeout=30)
+            response = self.session.post(f"{self.base_url}/issues.json", json=issue_data, timeout=30)
             response.raise_for_status()
             result = response.json()
             issue_id = result.get("issue", {}).get("id")
-            logger.info(
-                "Redmine: created issue #%s — %s",
-                issue_id,
-                subject[:80],
-            )
+            logger.info("Redmine: created issue #%s", issue_id)
             return issue_id
         except RequestException as e:
             logger.error("Redmine: failed to create issue: %s", e)
-            if hasattr(e, "response") and e.response is not None:
-                logger.error("Redmine: response: %s", e.response.text[:500])
             return None
 
     def _update_issue(self, issue_id: int, finding: Finding, reopen: bool = False) -> Optional[int]:
@@ -170,22 +161,60 @@ class RedmineClient:
         response.raise_for_status()
         return response.json().get("issue")
 
+    def _evaluate_routing(self, finding: Finding) -> tuple[int, bool, Optional[int]]:
+        """Evaluate routing rules to determine tracker and parent configuration."""
+        for rule in self.config.routing_rules:
+            if not rule.enabled:
+                continue
+            
+            # Check source constraint
+            if rule.source != "any" and rule.source != finding.source.value:
+                continue
+                
+            # Check match against finding's routing_key
+            val = finding.routing_key
+            matched = False
+            
+            if rule.match_type == "exact":
+                matched = (val == rule.match_value)
+            elif rule.match_type == "prefix":
+                matched = val.startswith(rule.match_value)
+            elif rule.match_type == "regex":
+                import re
+                try:
+                    if re.match(rule.match_value, val):
+                        matched = True
+                except re.error:
+                    pass
+            
+            if matched:
+                t_id = rule.tracker_id if rule.tracker_id else self.config.tracker_id
+                logger.debug("Redmine: finding matched routing rule '%s'", rule.match_value)
+                return t_id, rule.use_parent, rule.parent_tracker_id
 
-    def _get_or_create_parent_issue(self, finding: Finding) -> Optional[int]:
+        # Fallback to default
+        return self.config.tracker_id, self.config.enable_parent_issues, self.config.parent_tracker_id
+
+    def _get_or_create_parent_issue(self, finding: Finding, active_parent_tracker_id: Optional[int] = None) -> Optional[int]:
         """
-        Search for a parent device issue, and create it if it doesn't exist.
+        Find or create a parent issue (e.g. for the affected device).
         """
-        subject = f"[DEVICE] {finding.host}"
+        parent_tracker = active_parent_tracker_id if active_parent_tracker_id else self.config.parent_tracker_id
+        if not parent_tracker:
+            logger.debug("Redmine: no parent_tracker_id configured, skipping parent link")
+            return None
+
+        # Format parent subject, ensuring it respects the routing_key (or host fallback)
+        subject_target = finding.routing_key if finding.routing_key else finding.host
+        subject = f"Security Incidents: {subject_target}"
         url = f"{self.base_url}/issues.json"
-        
-        tracker_id = self.config.parent_tracker_id or self.config.tracker_id
         
         # 1. Search for existing open parent
         params = {
             "project_id": self.config.project_id,
+            "tracker_id": parent_tracker,
             "status_id": "open",
             "subject": subject,
-            "tracker_id": tracker_id,
             "limit": 1,
         }
         try:
@@ -211,7 +240,7 @@ class RedmineClient:
         issue_data = {
             "issue": {
                 "project_id": self.config.project_id,
-                "tracker_id": tracker_id,
+                "tracker_id": parent_tracker,
                 "subject": subject,
                 "description": description,
             }
@@ -305,8 +334,10 @@ class RedmineClient:
     def test_connection(self) -> bool:
         """Test connectivity to the Redmine API."""
         try:
-            url = f"{self.base_url}/projects/{self.config.project_id}.json"
-            response = self.session.get(url, timeout=10)
+            response = self.session.get(
+                f"{self.base_url}/projects/{self.config.project_id}.json",
+                timeout=10,
+            )
             response.raise_for_status()
             project = response.json().get("project", {})
             logger.info(
@@ -318,3 +349,14 @@ class RedmineClient:
         except Exception as e:
             logger.error("Redmine: connection test failed: %s", e)
             return False
+
+    def get_trackers(self) -> list[dict[str, Any]]:
+        """Fetch all available trackers from Redmine."""
+        url = f"{self.base_url}/trackers.json"
+        try:
+            response = self.session.get(url, timeout=10)
+            response.raise_for_status()
+            return response.json().get("trackers", [])
+        except Exception as e:
+            logger.error("Redmine: failed to fetch trackers: %s", e)
+            return []
