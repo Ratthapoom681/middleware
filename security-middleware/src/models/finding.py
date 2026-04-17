@@ -107,6 +107,10 @@ class Finding:
     # --- Pipeline metadata ---
     dedup_hash: str = field(default="", init=False)
     filtered: bool = field(default=False, init=False)
+    occurrence_count: int = field(default=1, init=False)
+    dedup_reason: Optional[str] = field(default=None, init=False)
+    redmine_issue_id: Optional[int] = field(default=None, init=False)
+    action: Optional[str] = field(default=None, init=False)
 
     def __post_init__(self):
         """Compute dedup hash after initialization."""

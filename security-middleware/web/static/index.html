@@ -691,6 +691,10 @@
         <div class="card">
             <div class="card-title">Options</div>
             <div class="form-grid">
+                <div class="form-group full-width">
+                    <label>Alerts JSON Path <span class="hint">(For file-based ingestion)</span></label>
+                    <input type="text" id="wazuh-alerts_json_path" placeholder="/var/ossec/logs/alerts/alerts.json">
+                </div>
                 <div class="form-group">
                     <label>Minimum Alert Level <span class="hint">(0-15)</span></label>
                     <input type="number" id="wazuh-min_level" min="0" max="15" placeholder="7">
@@ -743,7 +747,17 @@
                     <label>Severity Filter</label>
                     <div id="defectdojo-severity_filter-chips" class="chip-container" data-field="defectdojo-severity_filter"></div>
                 </div>
-                <div class="form-group" style="display:flex;align-items:end">
+                <div class="form-group" style="display:flex;align-items:start;flex-direction:column;gap:10px;">
+                    <div class="toggle-row" style="width:100%">
+                        <div>
+                            <div class="toggle-label">Enabled</div>
+                            <div class="toggle-desc">Enable DefectDojo polling</div>
+                        </div>
+                        <label class="toggle">
+                            <input type="checkbox" id="defectdojo-enabled">
+                            <span class="toggle-track"></span>
+                        </label>
+                    </div>
                     <div class="toggle-row" style="width:100%">
                         <div>
                             <div class="toggle-label">Verify SSL</div>
@@ -786,8 +800,24 @@
                     <input type="text" id="redmine-project_id" placeholder="security-incidents">
                 </div>
                 <div class="form-group">
-                    <label>Tracker ID</label>
+                    <label>Tracker ID <span class="hint">(Default for alerts/subtasks)</span></label>
                     <input type="number" id="redmine-tracker_id" min="1" placeholder="1">
+                </div>
+                <div class="form-group" style="display:flex;align-items:end">
+                    <div class="toggle-row" style="width:100%">
+                        <div>
+                            <div class="toggle-label">Device Parent Issues</div>
+                            <div class="toggle-desc">Create Epic/Parent tickets per device</div>
+                        </div>
+                        <label class="toggle">
+                            <input type="checkbox" id="redmine-enable_parent_issues">
+                            <span class="toggle-track"></span>
+                        </label>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Parent Tracker ID <span class="hint">(Tracker ID for the Device Epic)</span></label>
+                    <input type="number" id="redmine-parent_tracker_id" min="1" placeholder="Optional">
                 </div>
                 <div class="form-group">
                     <label>Dedup Custom Field ID <span class="hint">(optional)</span></label>
@@ -1135,9 +1165,11 @@ function populateForm(c) {
     setVal('wazuh-indexer_username', c.wazuh?.indexer_username);
     setVal('wazuh-indexer_password', c.wazuh?.indexer_password);
     setVal('wazuh-min_level', c.wazuh?.min_level);
+    setVal('wazuh-alerts_json_path', c.wazuh?.alerts_json_path);
     setChecked('wazuh-verify_ssl', c.wazuh?.verify_ssl);
 
     // DefectDojo
+    setChecked('defectdojo-enabled', c.defectdojo?.enabled);
     setVal('defectdojo-base_url', c.defectdojo?.base_url);
     setVal('defectdojo-api_key', c.defectdojo?.api_key);
     setChecked('defectdojo-verify_ssl', c.defectdojo?.verify_ssl);
@@ -1148,6 +1180,8 @@ function populateForm(c) {
     setVal('redmine-api_key', c.redmine?.api_key);
     setVal('redmine-project_id', c.redmine?.project_id);
     setVal('redmine-tracker_id', c.redmine?.tracker_id);
+    setChecked('redmine-enable_parent_issues', c.redmine?.enable_parent_issues);
+    setVal('redmine-parent_tracker_id', c.redmine?.parent_tracker_id);
     setVal('redmine-dedup_custom_field_id', c.redmine?.dedup_custom_field_id);
     const pm = c.redmine?.priority_map || {};
     setVal('priority-critical', pm.critical);
@@ -1199,10 +1233,12 @@ function collectForm() {
             indexer_url:      getVal('wazuh-indexer_url'),
             indexer_username: getVal('wazuh-indexer_username'),
             indexer_password: getVal('wazuh-indexer_password'),
+            alerts_json_path: getVal('wazuh-alerts_json_path'),
             verify_ssl:       getChecked('wazuh-verify_ssl'),
             min_level:        getInt('wazuh-min_level', 7),
         },
         defectdojo: {
+            enabled:         getChecked('defectdojo-enabled'),
             base_url:        getVal('defectdojo-base_url'),
             api_key:         getVal('defectdojo-api_key'),
             verify_ssl:      getChecked('defectdojo-verify_ssl'),
@@ -1213,6 +1249,8 @@ function collectForm() {
             api_key:               getVal('redmine-api_key'),
             project_id:            getVal('redmine-project_id'),
             tracker_id:            getInt('redmine-tracker_id', 1),
+            enable_parent_issues:  getChecked('redmine-enable_parent_issues'),
+            parent_tracker_id:     getIntOrNull('redmine-parent_tracker_id'),
             dedup_custom_field_id: getIntOrNull('redmine-dedup_custom_field_id'),
             priority_map: {
                 critical: getInt('priority-critical', 5),
@@ -1384,9 +1422,39 @@ async function fetchLiveEvents() {
             let findingsHtml = '';
             if (evt.findings && evt.findings.length) {
                 const f = evt.findings[0];
-                findingsHtml = `<b>${escapeHtml(f.title || 'Unknown Rule')}</b><br><span class="badge badge-orange" style="margin-top:4px;display:inline-block">Sev: ${escapeHtml(f.severity)}</span>`;
+                let decisionBadge = '';
+                const act = f.action || '';
+                if (act === 'created') {
+                    decisionBadge = '<span class="badge badge-green">Created</span>';
+                } else if (act === 'recreated') {
+                    decisionBadge = '<span class="badge badge-green">Recreated</span>'; 
+                } else if (act === 'updated') {
+                    decisionBadge = '<span class="badge badge-blue">Updated</span>';
+                } else if (act === 'reopened') {
+                    decisionBadge = '<span class="badge badge-blue">Reopened</span>';
+                } else if (act === 'failed') {
+                    decisionBadge = '<span class="badge" style="background:var(--red);color:white">Failed</span>';
+                } else if (f.reason === 'same_batch_duplicate') {
+                    decisionBadge = '<span class="badge badge-orange">Deduped</span>';
+                } else if (f.reason && f.reason.startsWith('Filtered')) {
+                    decisionBadge = '<span class="badge" style="background:var(--bg-hover)">Filtered</span>';
+                } else if (f.reason === 'Deduplication disabled') {
+                    decisionBadge = '<span class="badge badge-purple">Passed</span>';
+                } else {
+                    decisionBadge = '<span class="badge badge-purple">Processed</span>';
+                }
+
+                findingsHtml = `<b>${escapeHtml(f.title || 'Unknown Rule')}</b><br>
+                <div style="margin-top:4px;display:flex;gap:6px;align-items:center;">
+                    ${decisionBadge}
+                    <span class="badge" style="background:var(--bg-hover)">Sev: ${escapeHtml(f.severity)}</span>
+                </div>
+                <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">
+                    Reason: <i>${escapeHtml(f.reason || 'Unknown')}</i> &bull; Occurrences: ${f.occurrences || 1}
+                </div>`;
+
                 if (evt.findings.length > 1) {
-                    findingsHtml += ` <span style="font-size:11px;color:var(--text-muted)">+ ${evt.findings.length - 1} more</span>`;
+                    findingsHtml += `<div style="font-size:11px;color:var(--text-muted);margin-top:4px;">+ ${evt.findings.length - 1} more</div>`;
                 }
             } else {
                 findingsHtml = '<span style="color:var(--text-muted)">No parsable findings</span>';
@@ -1395,7 +1463,9 @@ async function fetchLiveEvents() {
             const s = evt.stats || {};
             let statsHtml = [];
             if (s.created > 0) statsHtml.push(`<span style="color:var(--green)">Created: ${s.created}</span>`);
+            if (s.recreated > 0) statsHtml.push(`<span style="color:var(--green)">Recreated: ${s.recreated}</span>`);
             if (s.updated > 0) statsHtml.push(`<span style="color:var(--accent)">Updated: ${s.updated}</span>`);
+            if (s.reopened > 0) statsHtml.push(`<span style="color:var(--accent)">Reopened: ${s.reopened}</span>`);
             if (s.deduplicated > 0) statsHtml.push(`<span style="color:var(--orange)">Deduplicated: ${s.deduplicated}</span>`);
             if (s.filtered > 0) statsHtml.push(`<span style="color:var(--text-muted)">Filtered: ${s.filtered}</span>`);
             if (s.failed > 0) statsHtml.push(`<span style="color:var(--red)">Failed: ${s.failed}</span>`);

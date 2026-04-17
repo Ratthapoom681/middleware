@@ -52,7 +52,7 @@ class MiddlewarePipeline:
 
     def __init__(self, config: AppConfig, config_path: str = None):
         self.config = config
-        self.config_path = config_path or "config/config.yaml"
+        self.config_path = config_path or config._loaded_path or "config/config.yaml"
         self._last_config_mtime = self._get_config_mtime()
 
         # Source clients
@@ -162,16 +162,19 @@ class MiddlewarePipeline:
             logger.info("No findings to process this cycle")
             return {"ingested": 0, "filtered": 0, "deduplicated": 0, "output": 0}
 
-        return self.process_batch(findings, cycle_start)
+        outcome = self.process_batch(findings, cycle_start)
+        return outcome["stats"]
 
-    def process_batch(self, findings: list[Finding], cycle_start: datetime = None) -> dict[str, int]:
+    def process_batch(self, findings: list[Finding], cycle_start: datetime = None) -> dict[str, Any]:
         """
         Process a batch of pre-ingested findings through the pipeline:
           filter → map → dedup → enrich → output
         """
+        from typing import Any
         if not cycle_start:
             cycle_start = datetime.utcnow()
             
+        original_findings = list(findings)
         total_ingested = len(findings)
         logger.info("Processing batch: %d findings", total_ingested)
 
@@ -186,40 +189,99 @@ class MiddlewarePipeline:
 
         # --- 4. Deduplicate ---
         logger.info("--- Deduplicating ---")
-        findings = self.dedup_stage.process(findings)
-        after_dedup = len(findings)
+        new_findings, repeat_findings = self.dedup_stage.process(findings)
+        after_dedup = len(new_findings)
 
         # --- 5. Enrich ---
         logger.info("--- Enriching ---")
-        findings = self.enricher.process(findings)
+        new_findings = self.enricher.process(new_findings)
+        if repeat_findings:
+            repeat_findings = self.enricher.process(repeat_findings)
 
-        # --- 6. Output to Redmine ---
-        logger.info("--- Creating Redmine issues ---")
-        stats = self.redmine.create_issues_batch(findings)
+        # --- 6. Output to Redmine (new → create, repeat → update) ---
+        logger.info("--- Creating Redmine issues (%d new) ---", len(new_findings))
+        create_stats, successful_new = self.redmine.create_issues_batch(new_findings)
+
+        # Propagate newly created redmine_issue_ids back to repeat findings in the same batch
+        new_ids = {f.dedup_hash: f.redmine_issue_id for f in successful_new if f.redmine_issue_id}
+        for rf in repeat_findings:
+            if not rf.redmine_issue_id and rf.dedup_hash in new_ids:
+                rf.redmine_issue_id = new_ids[rf.dedup_hash]
+
+        update_stats = {"created": 0, "updated": 0, "failed": 0, "reopened": 0, "recreated": 0}
+        successful_repeat: list[Finding] = []
+        if repeat_findings:
+            logger.info("--- Updating Redmine issues (%d repeat, %d total occurrences) ---",
+                        len(repeat_findings),
+                        sum(f.occurrence_count for f in repeat_findings))
+            update_stats, successful_repeat = self.redmine.create_issues_batch(repeat_findings)
+
+        # Merge stats
+        stats = {
+            "created": create_stats.get("created", 0) + update_stats.get("created", 0),
+            "updated": create_stats.get("updated", 0) + update_stats.get("updated", 0),
+            "reopened": create_stats.get("reopened", 0) + update_stats.get("reopened", 0),
+            "recreated": create_stats.get("recreated", 0) + update_stats.get("recreated", 0),
+            "failed": create_stats.get("failed", 0) + update_stats.get("failed", 0),
+        }
+
+        # --- 7. Commit successful NEW findings to dedup registry ---
+        # --- 7. Commit successful findings to dedup registry ---
+        # Only mark NEW findings as "seen" AFTER Redmine confirms success.
+        # Also persist lifecycle outcomes (recreated/mapped) for repeat findings.
+        if successful_new:
+            self.dedup_stage.commit_new(successful_new)
+        if successful_repeat:
+            self.dedup_stage.commit_updates(successful_repeat)
+            
+        total_failed = stats.get("failed", 0)
+        if total_failed > 0:
+            logger.warning(
+                "Deduplicator: %d findings were NOT committed (Redmine API failed). "
+                "They will be retried next cycle.",
+                total_failed,
+            )
 
         # --- Summary ---
         elapsed = (datetime.utcnow() - cycle_start).total_seconds()
         logger.info("=" * 60)
         logger.info("Pipeline processing complete in %.1fs", elapsed)
         logger.info(
-            "  Ingested: %d | After filter: %d | After dedup: %d | "
+            "  Ingested: %d | After filter: %d | New: %d | Repeat: %d | "
             "Created: %d | Updated: %d | Failed: %d",
             total_ingested,
             after_filter,
             after_dedup,
+            len(repeat_findings),
             stats.get("created", 0),
             stats.get("updated", 0),
             stats.get("failed", 0),
         )
         logger.info("=" * 60)
 
+        results = []
+        for f in original_findings:
+            results.append({
+                "title": f.title,
+                "severity": f.severity.value,
+                "source": f.source_id,
+                "action": getattr(f, "action", "Filtered"),
+                "reason": getattr(f, "dedup_reason", "Unknown"),
+                "occurrences": getattr(f, "occurrence_count", 1)
+            })
+
         return {
-            "ingested": total_ingested,
-            "filtered": total_ingested - after_filter,
-            "deduplicated": after_filter - after_dedup,
-            "created": stats.get("created", 0),
-            "updated": stats.get("updated", 0),
-            "failed": stats.get("failed", 0),
+            "stats": {
+                "ingested": total_ingested,
+                "filtered": total_ingested - after_filter,
+                "deduplicated": len(repeat_findings),
+                "created": stats.get("created", 0),
+                "updated": stats.get("updated", 0),
+                "reopened": stats.get("reopened", 0),
+                "recreated": stats.get("recreated", 0),
+                "failed": stats.get("failed", 0),
+            },
+            "results": results
         }
 
     def run(self) -> None:

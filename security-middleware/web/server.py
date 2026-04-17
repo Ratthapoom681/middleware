@@ -267,7 +267,7 @@ def wazuh_webhook():
 
         # Process the batch ad-hoc
         pipeline = MiddlewarePipeline(config)
-        stats = pipeline.process_batch(findings)
+        outcome = pipeline.process_batch(findings)
         pipeline.dedup_stage.close()
 
         # Log it to our Dashboard Queue
@@ -275,21 +275,13 @@ def wazuh_webhook():
             "id": str(uuid.uuid4()),
             "receive_time": datetime.now(timezone.utc).isoformat(),
             "alert_count": len(data),
-            "findings": [],
-            "stats": stats
+            "findings": outcome["results"],
+            "stats": outcome["stats"]
         }
-        
-        # Add limited metadata about the findings for the UI
-        for finding in findings:
-            record["findings"].append({
-                "title": finding.title,
-                "severity": finding.severity.value,
-                "source": finding.source_id
-            })
 
         WEBHOOK_HISTORY.appendleft(record)
 
-        return jsonify({"status": "ok", "stats": stats}), 200
+        return jsonify({"status": "ok", "stats": outcome["stats"]}), 200
 
     except Exception as e:
         logger.exception("Webhook processing failed: %s", e)
@@ -319,6 +311,7 @@ def _config_to_dict(config: AppConfig) -> dict:
         "redmine": asdict(config.redmine),
         "pipeline": {
             "poll_interval": config.pipeline.poll_interval,
+            "initial_lookback_minutes": config.pipeline.initial_lookback_minutes,
             "filter": asdict(config.pipeline.filter),
             "dedup": asdict(config.pipeline.dedup),
             "enrichment": asdict(config.pipeline.enrichment),

@@ -54,6 +54,8 @@ class RedmineConfig:
     api_key: str = "changeme"
     project_id: str = "security-incidents"
     tracker_id: int = 1
+    enable_parent_issues: bool = False
+    parent_tracker_id: Optional[int] = None
     dedup_custom_field_id: Optional[int] = None
     priority_map: dict[str, int] = field(default_factory=lambda: {
         "critical": 5,
@@ -109,6 +111,7 @@ class AppConfig:
     redmine: RedmineConfig = field(default_factory=RedmineConfig)
     pipeline: PipelineConfig = field(default_factory=PipelineConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
+    _loaded_path: str = ""
 
 
 def _apply_env_overrides(raw: dict[str, Any]) -> dict[str, Any]:
@@ -154,6 +157,7 @@ def _build_config(raw: dict[str, Any]) -> AppConfig:
     pipeline_raw = raw.get("pipeline", {})
     pipeline = PipelineConfig(
         poll_interval=pipeline_raw.get("poll_interval", 300),
+        initial_lookback_minutes=pipeline_raw.get("initial_lookback_minutes", 1440),
         filter=FilterConfig(**pipeline_raw.get("filter", {})),
         dedup=DedupConfig(**pipeline_raw.get("dedup", {})),
         enrichment=EnrichmentConfig(**pipeline_raw.get("enrichment", {})),
@@ -206,6 +210,8 @@ def load_config(config_path: Optional[str] = None) -> AppConfig:
 
     raw = _apply_env_overrides(raw)
     config = _build_config(raw)
+    if path:
+        config._loaded_path = str(path)
 
     # Setup logging
     logging.basicConfig(

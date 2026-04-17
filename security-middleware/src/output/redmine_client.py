@@ -61,6 +61,10 @@ class RedmineClient:
         # Get formatted description from enrichment, or use raw description
         description = finding.enrichment.get("redmine_description", finding.description)
 
+        # Ensure the dedup hash is explicitly in the description for fallback subject-matching
+        if finding.dedup_hash not in description:
+            description += f"\n\n---\n_Dedup Hash: {finding.dedup_hash}_"
+
         # Append raw alert JSON for full data visibility
         if finding.raw_data:
             import json
@@ -80,6 +84,12 @@ class RedmineClient:
                 ),
             }
         }
+
+        # Add parent issue ID if enabled and host is known
+        if self.config.enable_parent_issues and finding.host:
+            parent_id = self._get_or_create_parent_issue(finding)
+            if parent_id:
+                issue_data["issue"]["parent_issue_id"] = parent_id
 
         # Add dedup hash as custom field if configured
         if self.config.dedup_custom_field_id:
@@ -107,20 +117,22 @@ class RedmineClient:
                 logger.error("Redmine: response: %s", e.response.text[:500])
             return None
 
-    def _update_issue(self, issue_id: int, finding: Finding) -> Optional[int]:
+    def _update_issue(self, issue_id: int, finding: Finding, reopen: bool = False) -> Optional[int]:
         """Update an existing Redmine issue with new finding data."""
         url = f"{self.base_url}/issues/{issue_id}.json"
 
         # Add a note (journal entry) with the new occurrence
+        count = getattr(finding, 'occurrence_count', 1)
         note_parts = [
-            f"h3. Duplicate finding detected",
+            "h3. Repeat finding detected",
             "",
             f"|_. Source|{finding.source.value.upper()}|",
             f"|_. Source ID|{finding.source_id}|",
             f"|_. Timestamp|{finding.timestamp.strftime('%Y-%m-%d %H:%M:%S UTC')}|",
             f"|_. Severity|{finding.severity.value.upper()}|",
+            f"|_. New Occurrences|{count}|",
             "",
-            "This finding has been seen again. The existing issue has been updated.",
+            f"This finding has been seen *{count}* more time(s) since the last update.",
         ]
 
         update_data: dict[str, Any] = {
@@ -133,6 +145,9 @@ class RedmineClient:
                 ),
             }
         }
+        
+        if reopen:
+            update_data["issue"]["status_id"] = 1
 
         try:
             response = self.session.put(url, json=update_data, timeout=30)
@@ -143,102 +158,149 @@ class RedmineClient:
             logger.error("Redmine: failed to update issue #%s: %s", issue_id, e)
             return None
 
-    def _find_existing_issue(self, finding: Finding) -> Optional[int]:
+    def _get_issue(self, issue_id: int) -> Optional[dict[str, Any]]:
         """
-        Search for an existing open issue that matches this finding.
-
-        Uses custom field search if dedup_custom_field_id is configured,
-        otherwise falls back to subject-line matching.
+        Fetch issue explicitly by ID to verify state.
+        Returns None ONLY on explicit 404. Raises RequestException otherwise.
         """
-        try:
-            if self.config.dedup_custom_field_id:
-                return self._search_by_custom_field(finding.dedup_hash)
-            else:
-                return self._search_by_subject(finding)
-        except Exception as e:
-            logger.warning("Redmine: issue search failed: %s", e)
+        url = f"{self.base_url}/issues/{issue_id}.json"
+        response = self.session.get(url, timeout=10)
+        if response.status_code == 404:
             return None
+        response.raise_for_status()
+        return response.json().get("issue")
 
-    def _search_by_custom_field(self, dedup_hash: str) -> Optional[int]:
-        """Search for issue by dedup hash in custom field."""
+
+    def _get_or_create_parent_issue(self, finding: Finding) -> Optional[int]:
+        """
+        Search for a parent device issue, and create it if it doesn't exist.
+        """
+        subject = f"[DEVICE] {finding.host}"
         url = f"{self.base_url}/issues.json"
+        
+        tracker_id = self.config.parent_tracker_id or self.config.tracker_id
+        
+        # 1. Search for existing open parent
         params = {
             "project_id": self.config.project_id,
             "status_id": "open",
-            f"cf_{self.config.dedup_custom_field_id}": dedup_hash,
+            "subject": subject,
+            "tracker_id": tracker_id,
             "limit": 1,
         }
+        try:
+            response = self.session.get(url, params=params, timeout=30)
+            response.raise_for_status()
+            issues = response.json().get("issues", [])
+            if issues:
+                return issues[0]["id"]
+        except RequestException as e:
+            logger.warning("Redmine: failed to search for parent issue: %s", e)
 
-        response = self.session.get(url, params=params, timeout=30)
-        response.raise_for_status()
-        issues = response.json().get("issues", [])
+        # 2. Doesn't exist, create it
+        
+        # Build description with asset context if available
+        description = f"Security tracking Epic for device: *{finding.host}*"
+        asset_info = finding.enrichment.get("asset")
+        if asset_info:
+            description += "\n\nh3. Asset Information\n\n"
+            for key, value in asset_info.items():
+                if key != "aliases":
+                    description += f"|_. {key.replace('_', ' ').title()}|{value}|\n"
 
-        if issues:
-            issue_id = issues[0]["id"]
-            logger.debug("Redmine: found existing issue #%s by custom field", issue_id)
-            return issue_id
-        return None
-
-    def _search_by_subject(self, finding: Finding) -> Optional[int]:
-        """Search for issue by matching subject line."""
-        url = f"{self.base_url}/issues.json"
-
-        # Build the expected subject prefix
-        severity_prefix = finding.severity.value.upper()
-        search_term = f"[{severity_prefix}] [{finding.source.value.upper()}] {finding.title}"
-
-        params = {
-            "project_id": self.config.project_id,
-            "status_id": "open",
-            "subject": f"~{finding.title[:100]}",  # Partial match
-            "limit": 5,
+        issue_data = {
+            "issue": {
+                "project_id": self.config.project_id,
+                "tracker_id": tracker_id,
+                "subject": subject,
+                "description": description,
+            }
         }
 
-        response = self.session.get(url, params=params, timeout=30)
-        response.raise_for_status()
-        issues = response.json().get("issues", [])
+        try:
+            response = self.session.post(url, json=issue_data, timeout=30)
+            response.raise_for_status()
+            parent_id = response.json().get("issue", {}).get("id")
+            logger.info("Redmine: created new Parent Device Issue #%s for %s", parent_id, finding.host)
+            return parent_id
+        except RequestException as e:
+            logger.error("Redmine: failed to create parent issue for %s: %s", finding.host, e)
+            return None
 
-        for issue in issues:
-            # Check if the dedup hash appears in the description
-            desc = issue.get("description", "")
-            if finding.dedup_hash in desc:
-                logger.debug("Redmine: found existing issue #%s by subject match", issue["id"])
-                return issue["id"]
-
-        return None
-
-    def create_issues_batch(self, findings: list[Finding]) -> dict[str, int]:
+    def create_issues_batch(self, findings: list[Finding]) -> tuple[dict[str, int], list[Finding]]:
         """
         Process a batch of findings, creating or updating Redmine issues.
 
         Returns:
-            Dictionary with counts: {"created": N, "updated": M, "failed": K}
+            Tuple of (stats dict, list of successfully processed findings).
+            Stats dict has counts: {"created": N, "updated": M, "failed": K, "reopened": X, "recreated": Y}
         """
-        stats = {"created": 0, "updated": 0, "failed": 0}
+        stats = {"created": 0, "updated": 0, "failed": 0, "reopened": 0, "recreated": 0}
+        successful_findings: list[Finding] = []
 
         for finding in findings:
-            existing_id = self._find_existing_issue(finding)
-
-            if existing_id:
-                result = self._update_issue(existing_id, finding)
-                if result:
-                    stats["updated"] += 1
-                else:
+            if finding.redmine_issue_id:
+                try:
+                    issue = self._get_issue(finding.redmine_issue_id)
+                except RequestException as e:
+                    logger.warning("Redmine: transient error fetching issue #%s: %s", finding.redmine_issue_id, e)
+                    finding.action = "failed"
                     stats["failed"] += 1
-            else:
-                result = self._create_issue(finding)
-                if result:
-                    stats["created"] += 1
+                    continue
+
+                if not issue:
+                    # Missing in Redmine -> Recreate
+                    finding.action = "recreated"
+                    new_id = self._create_issue(finding)
+                    if new_id:
+                        finding.redmine_issue_id = new_id
+                        stats["recreated"] += 1
+                        successful_findings.append(finding)
+                    else:
+                        finding.action = "failed"
+                        stats["failed"] += 1
                 else:
+                    status = issue.get("status", {})
+                    is_closed = status.get("is_closed", False)
+
+                    if is_closed:
+                        finding.action = "reopened"
+                        result = self._update_issue(finding.redmine_issue_id, finding, reopen=True)
+                        if result:
+                            stats["reopened"] += 1
+                            successful_findings.append(finding)
+                        else:
+                            finding.action = "failed"
+                            stats["failed"] += 1
+                    else:
+                        finding.action = "updated"
+                        result = self._update_issue(finding.redmine_issue_id, finding)
+                        if result:
+                            stats["updated"] += 1
+                            successful_findings.append(finding)
+                        else:
+                            finding.action = "failed"
+                            stats["failed"] += 1
+            else:
+                finding.action = "created"
+                new_id = self._create_issue(finding)
+                if new_id:
+                    finding.redmine_issue_id = new_id
+                    stats["created"] += 1
+                    successful_findings.append(finding)
+                else:
+                    finding.action = "failed"
                     stats["failed"] += 1
 
         logger.info(
-            "Redmine: batch complete — %d created, %d updated, %d failed",
+            "Redmine: batch complete — %d created, %d updated, %d reopened, %d recreated, %d failed",
             stats["created"],
             stats["updated"],
+            stats["reopened"],
+            stats["recreated"],
             stats["failed"],
         )
-        return stats
+        return stats, successful_findings
 
     def test_connection(self) -> bool:
         """Test connectivity to the Redmine API."""

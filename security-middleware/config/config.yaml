@@ -35,7 +35,12 @@ redmine:
   base_url: "https://redmine.example.com"
   api_key: "changeme"
   project_id: "security-incidents"
-  tracker_id: 1                   # Bug / Incident tracker ID
+  # Default tracker ID for finding tasks
+  tracker_id: 1
+  # Create a parent issue for each device and attach findings as subtasks
+  enable_parent_issues: true
+  # Optional: different tracker ID for the device parent issues (e.g., an "Epic" tracker)
+  # parent_tracker_id: 2
   # Custom field ID for storing dedup hash (optional, set to null to use subject matching)
   dedup_custom_field_id: null
   # Map unified severity → Redmine priority ID

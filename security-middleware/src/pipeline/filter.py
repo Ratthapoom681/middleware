@@ -66,23 +66,27 @@ class FilterStage:
                 self.min_severity.value,
                 finding.title[:60],
             )
+            finding.dedup_reason = f"Filtered (severity < {self.min_severity.value})"
             return False
 
         # 2. Excluded rule IDs (Wazuh-specific)
         if finding.rule_id and finding.rule_id in self._exclude_rule_ids:
             logger.debug("Filter: dropped (excluded rule_id %s): %s", finding.rule_id, finding.title[:60])
+            finding.dedup_reason = f"Filtered (rule_id {finding.rule_id})"
             return False
 
         # 3. Host include pattern (if configured, finding must match at least one)
         if self._host_patterns:
             if not any(p.search(finding.host) for p in self._host_patterns):
                 logger.debug("Filter: dropped (host '%s' not in include list): %s", finding.host, finding.title[:60])
+                finding.dedup_reason = "Filtered (host excluded)"
                 return False
 
         # 4. Title exclude patterns
         if self._title_exclude_patterns:
             if any(p.search(finding.title) for p in self._title_exclude_patterns):
                 logger.debug("Filter: dropped (title matches exclude pattern): %s", finding.title[:60])
+                finding.dedup_reason = "Filtered (title excluded)"
                 return False
 
         return True

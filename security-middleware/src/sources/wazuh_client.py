@@ -325,6 +325,9 @@ class WazuhClient:
             except (ValueError, AttributeError):
                 timestamp = datetime.now(timezone.utc)
 
+            # Priority: data.devname > data.devid > agent.name > agent.ip
+            host_name = data.get("devname") or data.get("devid") or agent.get("name") or agent.get("ip") or "unknown"
+
             return Finding(
                 source=FindingSource.WAZUH,
                 source_id=alert.get("id", str(alert.get("_id", "unknown"))),
@@ -332,7 +335,7 @@ class WazuhClient:
                 description="\n".join(description_parts),
                 severity=severity,
                 raw_severity=str(level),
-                host=agent.get("name", agent.get("ip", "unknown")),
+                host=host_name,
                 cve_ids=list(set(cve_ids)),
                 tags=rule.get("groups", []),
                 timestamp=timestamp,
