@@ -429,11 +429,20 @@ function renderTrackerDropdowns() {
     }
 }
 
-function addRoutingRule() {
+function addRoutingRuleFromForm() {
+    const source = document.getElementById("new-rule-source").value;
+    const match_type = document.getElementById("new-rule-match").value;
+    const match_value = document.getElementById("new-rule-value").value.trim();
+    const t_id_val = document.getElementById("new-rule-tracker").value;
+    const tracker_id = t_id_val ? parseInt(t_id_val) : null;
+    
     localRoutingRules.push({
-        enabled: true, source: "any", match_type: "exact", match_value: "",
-        tracker_id: null, use_parent: false, parent_tracker_id: null
+        enabled: true, source: source, match_type: match_type, match_value: match_value,
+        tracker_id: tracker_id, use_parent: false, parent_tracker_id: null
     });
+    
+    document.getElementById("new-rule-value").value = "";
+    document.getElementById("new-rule-tracker").value = "";
     renderRoutingRules();
 }
 
@@ -501,8 +510,106 @@ function renderRoutingRules() {
             <td><button class="btn btn-sm btn-danger" onclick="deleteRoutingRule(${i})">X</button></td>
         </tr>
     `).join('');
-    
     bindRoutingRuleInputs();
+    validateRoutingRules();
+    evaluateRoutingSandbox(); // re-eval test on rules change
+}
+
+function validateRoutingRules() {
+    const wDiv = document.getElementById('routing-warnings');
+    if (!wDiv) return;
+    
+    let warnings = [];
+    
+    for (let i = 0; i < localRoutingRules.length; i++) {
+        const r = localRoutingRules[i];
+        if (!r.enabled) continue;
+        
+        if (r.match_type === 'exact' && !r.match_value) {
+            warnings.push(`Rule #${i+1} has an empty 'exact' Match Value! This will ONLY match completely missing device names.`);
+        }
+        
+        if ((r.match_type === 'prefix' || r.match_type === 'regex') && !r.match_value) {
+            warnings.push(`Rule #${i+1} has an empty '${r.match_type}'! This makes it a Catch-All, shadowing all rules below it.`);
+        }
+    }
+    
+    if (warnings.length > 0) {
+        wDiv.innerHTML = warnings.map(w => `<div class="toast toast-warning" style="position:static; margin-bottom:5px; opacity:1;"><span>&#9888;</span> ${escapeHtml(w)}</div>`).join('');
+    } else {
+        wDiv.innerHTML = '';
+    }
+}
+
+function evaluateRoutingSandbox() {
+    const srcEl = document.getElementById('sandbox-source');
+    const devEl = document.getElementById('sandbox-device');
+    const resEl = document.getElementById('sandbox-result-text');
+    if (!srcEl || !devEl || !resEl) return;
+    
+    const source = srcEl.value;
+    const val = devEl.value.trim();
+    if (!val) {
+        resEl.innerHTML = `<span style="color:var(--text-muted)">Type a device name to see routing logic...</span>`;
+        return;
+    }
+    
+    let matchedRule = null;
+    let matchedIndex = -1;
+    let selectedTracker = getInt('redmine-tracker_id', 1); // default
+    
+    for (let i = 0; i < localRoutingRules.length; i++) {
+        const rule = localRoutingRules[i];
+        if (!rule.enabled) continue;
+        if (rule.source !== "any" && rule.source !== source) continue;
+        
+        let matched = false;
+        if (rule.match_type === "exact") {
+            matched = (val === rule.match_value);
+        } else if (rule.match_type === "prefix") {
+            matched = val.startsWith(rule.match_value);
+        } else if (rule.match_type === "regex") {
+            try {
+                const regex = new RegExp(rule.match_value);
+                matched = regex.test(val);
+            } catch(e) {}
+        }
+        
+        if (matched) {
+            matchedRule = rule;
+            matchedIndex = i;
+            if (rule.tracker_id) selectedTracker = rule.tracker_id;
+            break;
+        }
+    }
+    
+    let trackerName = globalTrackers.find(t => t.id == selectedTracker)?.name || "Unknown Tracker";
+    
+    if (matchedRule) {
+        resEl.innerHTML = `✅ Matches <b>Rule #${matchedIndex + 1}</b> (${matchedRule.match_type}: <i>${escapeHtml(matchedRule.match_value || '(empty)')}</i>)<br>
+        <span style="color:var(--green);margin-top:6px;display:inline-block;">&rarr; Routing to Tracker: <b>${selectedTracker}</b> (${escapeHtml(trackerName)})</span>`;
+    } else {
+        resEl.innerHTML = `⚠️ No rules matched.<br>
+        <span style="color:var(--text-muted);margin-top:6px;display:inline-block;">&rarr; Falling back to Default Tracker: <b>${selectedTracker}</b> (${escapeHtml(trackerName)})</span>`;
+    }
+}
+
+function useCurrentDeviceForRouting(source, routingKey) {
+    // Switch to Redmine tab
+    document.querySelector('.nav-item[data-section="redmine"]').click();
+    
+    // Fill form
+    const srcEl = document.getElementById("new-rule-source");
+    if(srcEl) srcEl.value = (source === "defectdojo") ? "defectdojo" : "wazuh";
+    
+    const mtEl = document.getElementById("new-rule-match");
+    if(mtEl) mtEl.value = "exact";
+    
+    const valEl = document.getElementById("new-rule-value");
+    if(valEl) valEl.value = routingKey;
+    
+    valEl.focus();
+    toast("Populated Add Rule form with device value!", "info");
 }
 
 // ── Live Events ────────────────────────────────────────────────
@@ -556,8 +663,15 @@ async function fetchLiveEvents() {
                     ${decisionBadge}
                     <span class="badge" style="background:var(--bg-hover)">Sev: ${escapeHtml(f.severity)}</span>
                 </div>
+                <div style="font-size:11px;color:var(--text-secondary);margin-top:4px;border-left:2px solid var(--border);padding-left:6px;">
+                    <div>Host: <span style="color:var(--text)">${escapeHtml(f.host || '')}</span></div>
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <div>Device Name Used For Routing: <span style="font-family:'JetBrains Mono', monospace;color:var(--accent)">${escapeHtml(f.routing_key || '')}</span></div>
+                        <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;height:auto;" onclick="useCurrentDeviceForRouting('${escapeHtml(f.source||'')}', '${escapeHtml(f.routing_key||'')}')">Use Device for Routing</button>
+                    </div>
+                </div>
                 <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">
-                    Reason: <i>${escapeHtml(f.reason || 'Unknown')}</i> &bull; Occurrences: ${f.occurrences || 1}
+                    Reason: <i>${escapeHtml(f.reason || 'Unknown')}</i> &bull; Tracker: ${f.selected_tracker || '?'} &bull; Rule: ${escapeHtml(f.matched_rule || 'none')} &bull; Occurrences: ${f.occurrences || 1}
                 </div>`;
 
                 if (evt.findings.length > 1) {

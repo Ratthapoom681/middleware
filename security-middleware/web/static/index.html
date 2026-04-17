@@ -316,19 +316,43 @@
         </div>
 
         <div class="card">
-            <div class="card-title">Device Routing Rules 
-                <button class="btn btn-sm" onclick="addRoutingRule()" style="margin-left:auto">+ Add Rule</button>
+            <div class="card-title">Device Routing Rules</div>
+            
+            <div id="routing-warnings" style="margin-bottom:15px"></div>
+            
+            <div class="routing-add-form" style="background:var(--bg-hover); padding:15px; border-radius:6px; margin-bottom:20px; display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end;">
+                <div style="flex:1;min-width:120px;">
+                    <label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:4px;">Source</label>
+                    <select id="new-rule-source" style="width:100%;"><option value="any">Any</option><option value="wazuh">Wazuh</option><option value="defectdojo">DefectDojo</option></select>
+                </div>
+                <div style="flex:1;min-width:120px;">
+                    <label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:4px;">Match By</label>
+                    <select id="new-rule-match" style="width:100%;"><option value="exact">Exact Device</option><option value="prefix">Device Prefix</option><option value="regex">Advanced (Regex)</option></select>
+                </div>
+                <div style="flex:2;min-width:200px;">
+                    <label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:4px;">Device Value</label>
+                    <input type="text" id="new-rule-value" placeholder="e.g. server-01" style="width:100%;">
+                </div>
+                <div style="flex:1;min-width:120px;">
+                    <label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:4px;">Target Tracker</label>
+                    <div id="new-rule-tracker-container">
+                         <input type="number" id="new-rule-tracker" class="routing-tracker-select" placeholder="ID" min="1" style="width:100%;">
+                    </div>
+                </div>
+                <div>
+                   <button class="btn" style="background:var(--primary);color:white;border:none;height:32px;padding:0 15px;" onclick="addRoutingRuleFromForm()">+ Add Rule</button>
+                </div>
             </div>
-            <div class="toggle-desc" style="margin-bottom: 15px;">Evaluate Devname properties against string matches to divert output. First match applies.</div>
+
+            <div class="toggle-desc" style="margin-bottom: 15px;">Evaluates Device Name Used For Routing against string matches. First match wins.</div>
             <table class="priority-table">
                 <thead>
                     <tr>
                         <th style="width: 15%">Source</th>
                         <th style="width: 15%">Match Type</th>
-                        <th style="width: 20%">Match Value</th>
-                        <th style="width: 15%">Tracker</th>
-                        <th style="width: 10%">Use Parent</th>
-                        <th style="width: 15%">Parent Tracker</th>
+                        <th style="width: 25%">Device Value</th>
+                        <th style="width: 20%">Tracker</th>
+                        <th style="width: 15%">Parent</th>
                         <th style="width: 5%">On</th>
                         <th style="width: 5%"></th>
                     </tr>
@@ -337,6 +361,25 @@
                     <!-- Filled by renderRoutingRules() -->
                 </tbody>
             </table>
+            
+            <div style="margin-top:15px;padding:12px;background:var(--bg);border-left:4px solid var(--border);border-radius:0 4px 4px 0;font-size:13px;color:var(--text-secondary);">
+                <span><b>Fallback:</b> If no rule evaluates to true, issues default to Tracker ID <span id="fallback-tracker-id" style="font-weight:600;color:var(--text)">(Main)</span></span>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Test Routing Rules 🧪</div>
+            <div class="toggle-desc">Instantly test how a specific Device Name Used For Routing will be evaluated against your active routing configuration.</div>
+            <div style="display:flex;gap:10px;margin-top:12px;">
+                <select id="sandbox-source" style="padding:6px 12px;border-radius:4px;border:1px solid var(--border);background:var(--bg);color:var(--text);" oninput="evaluateRoutingSandbox()">
+                   <option value="wazuh">Wazuh</option>
+                   <option value="defectdojo">DefectDojo</option>
+                </select>
+                <input type="text" id="sandbox-device" placeholder="Enter test device name here..." oninput="evaluateRoutingSandbox()" style="flex:1;padding:6px;border-radius:4px;border:1px solid var(--border);background:var(--bg);color:var(--text);">
+            </div>
+            <div id="sandbox-result" style="margin-top:15px;padding:12px;border-radius:4px;background:rgba(255,255,255,0.03);font-family:'JetBrains Mono', monospace; font-size:13px; border: 1px solid var(--border);">
+                <span id="sandbox-result-text" style="color:var(--text-muted)">Type a device name to see routing logic...</span>
+            </div>
         </div>
 
         <div style="display:flex;gap:10px">

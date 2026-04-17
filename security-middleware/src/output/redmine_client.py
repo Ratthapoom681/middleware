@@ -196,9 +196,13 @@ class RedmineClient:
             if matched:
                 t_id = rule.tracker_id if rule.tracker_id else self.config.tracker_id
                 logger.debug("Redmine: finding matched routing rule '%s'", rule.match_value)
+                finding.enrichment["matched_rule"] = f"{rule.match_type}: {rule.match_value or '(empty)'}"
+                finding.enrichment["selected_tracker"] = t_id
                 return t_id, rule.use_parent, rule.parent_tracker_id
 
         # Fallback to default
+        finding.enrichment["matched_rule"] = "default fallback"
+        finding.enrichment["selected_tracker"] = self.config.tracker_id
         return self.config.tracker_id, self.config.enable_parent_issues, self.config.parent_tracker_id
 
     def _get_or_create_parent_issue(self, finding: Finding, active_parent_tracker_id: Optional[int] = None) -> Optional[int]:

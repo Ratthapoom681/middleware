@@ -261,13 +261,20 @@ class MiddlewarePipeline:
 
         results = []
         for f in original_findings:
+            # Force evaluation of tracing metadata even if finding was filtered
+            self.redmine._evaluate_routing(f)
+            
             results.append({
                 "title": f.title,
                 "severity": f.severity.value,
                 "source": f.source_id,
                 "action": getattr(f, "action", None) or "Filtered",
                 "reason": getattr(f, "dedup_reason", None) or "Unknown",
-                "occurrences": getattr(f, "occurrence_count", 1)
+                "occurrences": getattr(f, "occurrence_count", 1),
+                "host": f.host,
+                "routing_key": f.routing_key,
+                "matched_rule": f.enrichment.get("matched_rule", "unknown"),
+                "selected_tracker": f.enrichment.get("selected_tracker", "unknown")
             })
 
         return {

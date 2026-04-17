@@ -327,7 +327,7 @@ class WazuhClient:
 
             # Priority: data.devname > data.devid > agent.name > agent.ip
             host_name = data.get("devname") or data.get("devid") or agent.get("name") or agent.get("ip") or "unknown"
-            routing_key = data.get("devname", "")
+            routing_key = host_name
 
             return Finding(
                 source=FindingSource.WAZUH,
