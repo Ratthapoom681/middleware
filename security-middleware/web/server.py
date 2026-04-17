@@ -279,36 +279,6 @@ def fetch_redmine_trackers():
         logger.exception("Redmine tracker synchronization failed")
         return jsonify({"status": "error", "message": str(e)}), 500
 
-
-@app.route("/api/config/backups", methods=["GET"])
-def list_backups():
-    """List available config backups."""
-    backups = []
-    if BACKUP_DIR.exists():
-        for f in sorted(BACKUP_DIR.glob("config_*.yaml"), reverse=True):
-            backups.append({
-                "name": f.name,
-                "size": f.stat().st_size,
-                "modified": f.stat().st_mtime,
-            })
-    return jsonify({"status": "ok", "backups": backups[:20]})
-
-
-@app.route("/api/config/restore/<filename>", methods=["POST"])
-def restore_backup(filename: str):
-    """Restore a config backup."""
-    try:
-        backup_path = BACKUP_DIR / filename
-        if not backup_path.exists():
-            return jsonify({"status": "error", "message": "Backup not found"}), 404
-
-        import shutil
-        shutil.copy2(backup_path, CONFIG_PATH)
-        return jsonify({"status": "ok", "message": f"Restored from {filename}"})
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
 @app.route("/api/webhook/wazuh", methods=["POST"])
 def wazuh_webhook():
     """
