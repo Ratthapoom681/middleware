@@ -46,6 +46,14 @@ class DefectDojoConfig:
     api_key: str = "Token changeme"
     verify_ssl: bool = True
     severity_filter: list[str] = field(default_factory=lambda: ["Critical", "High", "Medium"])
+    product_ids: list[int] = field(default_factory=list)
+    engagement_ids: list[int] = field(default_factory=list)
+    test_ids: list[int] = field(default_factory=list)
+    active: bool = True
+    verified: bool = True
+    updated_since_minutes: int = 0
+    fetch_limit: int = 1000
+    cursor_path: str = "data/defectdojo_cursor.json"
 
 
 @dataclass
@@ -162,12 +170,20 @@ def _apply_env_overrides(raw: dict[str, Any]) -> dict[str, Any]:
 
 def _build_config(raw: dict[str, Any]) -> AppConfig:
     """Build typed AppConfig from raw dictionary."""
+    
+    # Normalize legacy namespace explicitly mapped in older deployments
+    if "dojo" in raw and "defectdojo" not in raw:
+        raw["defectdojo"] = raw.pop("dojo")
+        
     wazuh = WazuhConfig(**raw.get("wazuh", {}))
     defectdojo = DefectDojoConfig(**raw.get("defectdojo", {}))
     redmine_raw = raw.get("redmine", {})
-    # Instantiate routing rules explicitly if present
     rules_raw = redmine_raw.get("routing_rules", [])
-    routing_rules = [RedmineRoutingRule(**r) for r in rules_raw] if rules_raw else []
+    routing_rules = []
+    for r in rules_raw:
+        if r.get("source") == "dojo":
+            r["source"] = "defectdojo"
+        routing_rules.append(RedmineRoutingRule(**r))
     
     redmine = RedmineConfig(
         base_url=redmine_raw.get("base_url", "https://localhost:3000"),

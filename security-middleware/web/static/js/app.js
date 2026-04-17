@@ -492,7 +492,7 @@ function renderRoutingRules() {
                 <select class="r-source" style="padding:4px; max-width:80px; font-size:11px;">
                     <option value="any" ${r.source==='any'?'selected':''}>Any</option>
                     <option value="wazuh" ${r.source==='wazuh'?'selected':''}>Wazuh</option>
-                    <option value="dojo" ${r.source==='dojo'?'selected':''}>Dojo</option>
+                    <option value="defectdojo" ${r.source==='defectdojo'?'selected':''}>DefectDojo</option>
                 </select>
             </td>
             <td>

@@ -20,6 +20,7 @@ from requests.exceptions import RequestException
 
 from src.config import WazuhConfig
 from src.models.finding import Finding, FindingSource, Severity
+from src.pipeline.identity import hydrate_identity
 
 logger = logging.getLogger(__name__)
 
@@ -327,9 +328,8 @@ class WazuhClient:
 
             # Priority: data.devname > data.devid > agent.name > agent.ip
             host_name = data.get("devname") or data.get("devid") or agent.get("name") or agent.get("ip") or "unknown"
-            routing_key = host_name
 
-            return Finding(
+            finding = Finding(
                 source=FindingSource.WAZUH,
                 source_id=alert.get("id", str(alert.get("_id", "unknown"))),
                 title=rule.get("description", "Wazuh Alert"),
@@ -338,7 +338,6 @@ class WazuhClient:
                 raw_severity=str(level),
                 host=host_name,
                 srcip=data.get("srcip", ""),
-                routing_key=routing_key,
                 cve_ids=list(set(cve_ids)),
                 tags=rule.get("groups", []),
                 timestamp=timestamp,
@@ -346,6 +345,8 @@ class WazuhClient:
                 rule_groups=rule.get("groups", []),
                 raw_data=alert,
             )
+            
+            return hydrate_identity(finding)
 
         except Exception as e:
             logger.warning("Wazuh: failed to parse alert: %s", e)

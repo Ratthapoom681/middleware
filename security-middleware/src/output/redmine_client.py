@@ -34,19 +34,15 @@ class RedmineClient:
 
     def create_or_update_issue(self, finding: Finding) -> Optional[int]:
         """
-        Create a new Redmine issue for the finding, or update an existing
-        one if a duplicate is found.
-
+        Wrapper to proxy single-issue creation requests through the canonical batch workflow.
         Returns:
             The Redmine issue ID, or None if the operation failed.
         """
-        # Check for existing issue
-        existing_id = self._find_existing_issue(finding)
-
-        if existing_id:
-            return self._update_issue(existing_id, finding)
-        else:
-            return self._create_issue(finding)
+        logger.warning("Redmine: create_or_update_issue() is deprecated; routing through create_issues_batch.")
+        stats, successful = self.create_issues_batch([finding])
+        if successful:
+            return successful[0].redmine_issue_id
+        return None
 
     def _create_issue(self, finding: Finding) -> Optional[int]:
         """Create a new Redmine issue."""
@@ -69,7 +65,10 @@ class RedmineClient:
 
         # Ensure the dedup hash is explicitly in the description for fallback subject-matching
         if finding.dedup_hash not in description:
-            description += f"\n\n---\n_Dedup Hash: {finding.dedup_hash}_"
+            description += f"\n\n---\n_Dedup Hash: {finding.dedup_hash}_\n"
+
+        if "defectdojo_url" in finding.enrichment:
+            description += f"\n---\n\nh3. Source Finding\n\n\"{finding.title}\":{finding.enrichment['defectdojo_url']}\n"
 
         # Append raw alert JSON for full data visibility
         if finding.raw_data:

@@ -88,10 +88,18 @@ class Finding:
     raw_severity: str = ""                  # Original severity string/level from source
 
     # --- Context ---
-    host: str = ""                          # Affected hostname or IP
+    host: str = ""                          # Affected hostname or IP (UI fallback/routing)
     srcip: str = ""                         # Attacker origin IP
+    endpoints: list[str] = field(default_factory=list) # DefectDojo explicit endpoints
+    endpoint_url: str = ""                  # Explicit ZAP/Web URL target
+    component: str = ""                     # Dependency or system component
+    component_version: str = ""
+    plugin_id: str = ""                     # Tenable/scanner isolated plugin boundary
+    found_by: str = ""                      # Parent scanner tracking string
+    cwe: str = ""                           # Contextual enum for ZAP injections
+    param: str = ""                         # Targeted injection payload location
     routing_key: str = ""                   # Key for routing rules (e.g. devname)
-    cvss: Optional[float] = None           # CVSS score if available
+    cvss: Optional[float] = None            # CVSS score if available
     cve_ids: list[str] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
     timestamp: datetime = field(default_factory=datetime.utcnow)
@@ -107,6 +115,7 @@ class Finding:
     enrichment: dict[str, Any] = field(default_factory=dict)
 
     # --- Pipeline metadata ---
+    dedup_key: str = field(default="", init=False)
     dedup_hash: str = field(default="", init=False)
     filtered: bool = field(default=False, init=False)
     occurrence_count: int = field(default=1, init=False)
@@ -114,31 +123,6 @@ class Finding:
     redmine_issue_id: Optional[int] = field(default=None, init=False)
     issue_state: str = field(default="open", init=False)
     action: Optional[str] = field(default=None, init=False)
-
-    def __post_init__(self):
-        """Compute dedup hash after initialization."""
-        self.dedup_hash = self._compute_hash()
-
-    def _compute_hash(self) -> str:
-        """
-        Generate a SHA-256 deduplication hash based on key identity fields.
-
-        The hash is based on: source, title, host, and sorted CVE IDs.
-        This means the same vulnerability on the same host from the same
-        source will always produce the same hash.
-        """
-        key_parts = [
-            self.source.value,
-            self.title.strip().lower(),
-            self.host.strip().lower(),
-            self.srcip.strip().lower(),
-            ",".join(sorted(self.cve_ids)),
-        ]
-        if self.rule_id:
-            key_parts.append(self.rule_id)
-
-        raw = "|".join(key_parts)
-        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize finding to a dictionary."""
@@ -151,6 +135,14 @@ class Finding:
             "raw_severity": self.raw_severity,
             "host": self.host,
             "srcip": self.srcip,
+            "endpoints": self.endpoints,
+            "endpoint_url": self.endpoint_url,
+            "component": self.component,
+            "component_version": self.component_version,
+            "plugin_id": self.plugin_id,
+            "found_by": self.found_by,
+            "cwe": self.cwe,
+            "param": self.param,
             "routing_key": self.routing_key,
             "cvss": self.cvss,
             "cve_ids": self.cve_ids,
@@ -159,6 +151,7 @@ class Finding:
             "rule_id": self.rule_id,
             "rule_groups": self.rule_groups,
             "enrichment": self.enrichment,
+            "dedup_key": self.dedup_key,
             "dedup_hash": self.dedup_hash,
         }
 
