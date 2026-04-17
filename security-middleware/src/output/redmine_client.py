@@ -52,6 +52,12 @@ class RedmineClient:
         """Create a new Redmine issue."""
         url = f"{self.base_url}/issues.json"
 
+        # Routing engine determines tracker and parent linking
+        tracker_id, use_parent, active_parent_tracker_id = self._evaluate_routing(finding)
+        parent_id = None
+        if use_parent:
+            parent_id = self._get_or_create_parent_issue(finding, active_parent_tracker_id)
+
         # Build subject line with severity prefix
         severity_prefix = finding.severity.value.upper()
         subject = f"[{severity_prefix}] [{finding.source.value.upper()}] {finding.title}"

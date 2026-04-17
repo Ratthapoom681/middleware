@@ -156,17 +156,7 @@ class DeduplicatorStage:
                     accepted_hashes.add(h)
                     new_findings.append(finding)
 
-            # Update counts in DB for already-tracked hashes
-            db_updates = {h: count for h, (_, count) in repeat_map.items() if h in seen_hashes}
-            if db_updates:
-                self._conn.executemany(
-                    """
-                    UPDATE seen_hashes
-                    SET last_seen = ?, count = count + ?
-                    WHERE hash = ?
-                    """,
-                    [(now, count, hash_value) for hash_value, count in db_updates.items()],
-                )
+
 
         # Build the repeat_findings list with occurrence_count stamped
         repeat_findings: list[Finding] = []
@@ -236,10 +226,15 @@ class DeduplicatorStage:
         now = time.time()
         records = [
             (
-                getattr(finding, 'redmine_issue_id', None),
-                "open",
+                finding.dedup_hash,
+                finding.source.value,
+                finding.title[:200],
                 now,
-                finding.dedup_hash
+                now,
+                finding.occurrence_count,
+                finding.occurrence_count,
+                getattr(finding, 'redmine_issue_id', None),
+                "open"
             )
             for finding in findings
         ]
@@ -247,9 +242,14 @@ class DeduplicatorStage:
         with self._conn:
             self._conn.executemany(
                 """
-                UPDATE seen_hashes
-                SET redmine_issue_id = ?, issue_state = ?, last_seen = MAX(last_seen, ?)
-                WHERE hash = ?
+                INSERT INTO seen_hashes
+                (hash, source, title, first_seen, last_seen, count, flushed_count, redmine_issue_id, issue_state)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(hash) DO UPDATE SET
+                    redmine_issue_id = excluded.redmine_issue_id,
+                    issue_state = excluded.issue_state,
+                    last_seen = MAX(seen_hashes.last_seen, excluded.last_seen),
+                    count = seen_hashes.count + excluded.count
                 """,
                 records
             )

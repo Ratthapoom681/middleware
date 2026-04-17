@@ -265,8 +265,8 @@ class MiddlewarePipeline:
                 "title": f.title,
                 "severity": f.severity.value,
                 "source": f.source_id,
-                "action": getattr(f, "action", "Filtered"),
-                "reason": getattr(f, "dedup_reason", "Unknown"),
+                "action": getattr(f, "action", None) or "Filtered",
+                "reason": getattr(f, "dedup_reason", None) or "Unknown",
                 "occurrences": getattr(f, "occurrence_count", 1)
             })
 
