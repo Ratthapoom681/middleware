@@ -337,6 +337,7 @@ class WazuhClient:
                 severity=severity,
                 raw_severity=str(level),
                 host=host_name,
+                srcip=data.get("srcip", ""),
                 routing_key=routing_key,
                 cve_ids=list(set(cve_ids)),
                 tags=rule.get("groups", []),

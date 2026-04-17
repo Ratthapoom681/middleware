@@ -89,6 +89,7 @@ class Finding:
 
     # --- Context ---
     host: str = ""                          # Affected hostname or IP
+    srcip: str = ""                         # Attacker origin IP
     routing_key: str = ""                   # Key for routing rules (e.g. devname)
     cvss: Optional[float] = None           # CVSS score if available
     cve_ids: list[str] = field(default_factory=list)
@@ -111,6 +112,7 @@ class Finding:
     occurrence_count: int = field(default=1, init=False)
     dedup_reason: Optional[str] = field(default=None, init=False)
     redmine_issue_id: Optional[int] = field(default=None, init=False)
+    issue_state: str = field(default="open", init=False)
     action: Optional[str] = field(default=None, init=False)
 
     def __post_init__(self):
@@ -129,6 +131,7 @@ class Finding:
             self.source.value,
             self.title.strip().lower(),
             self.host.strip().lower(),
+            self.srcip.strip().lower(),
             ",".join(sorted(self.cve_ids)),
         ]
         if self.rule_id:
@@ -147,6 +150,7 @@ class Finding:
             "severity": self.severity.value,
             "raw_severity": self.raw_severity,
             "host": self.host,
+            "srcip": self.srcip,
             "routing_key": self.routing_key,
             "cvss": self.cvss,
             "cve_ids": self.cve_ids,

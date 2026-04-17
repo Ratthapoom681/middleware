@@ -293,6 +293,7 @@ class RedmineClient:
                     new_id = self._create_issue(finding)
                     if new_id:
                         finding.redmine_issue_id = new_id
+                        finding.issue_state = "open"
                         stats["recreated"] += 1
                         successful_findings.append(finding)
                     else:
@@ -306,6 +307,7 @@ class RedmineClient:
                         finding.action = "reopened"
                         result = self._update_issue(finding.redmine_issue_id, finding, reopen=True)
                         if result:
+                            finding.issue_state = "open"
                             stats["reopened"] += 1
                             successful_findings.append(finding)
                         else:
@@ -315,6 +317,7 @@ class RedmineClient:
                         finding.action = "updated"
                         result = self._update_issue(finding.redmine_issue_id, finding)
                         if result:
+                            finding.issue_state = "open"
                             stats["updated"] += 1
                             successful_findings.append(finding)
                         else:
@@ -325,6 +328,7 @@ class RedmineClient:
                 new_id = self._create_issue(finding)
                 if new_id:
                     finding.redmine_issue_id = new_id
+                    finding.issue_state = "open"
                     stats["created"] += 1
                     successful_findings.append(finding)
                 else:

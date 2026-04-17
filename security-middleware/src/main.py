@@ -242,6 +242,9 @@ class MiddlewarePipeline:
                 total_failed,
             )
 
+        # Ensure database cleanup happens strictly after operational dependencies conclude
+        self.dedup_stage.cleanup()
+
         # --- Summary ---
         elapsed = (datetime.utcnow() - cycle_start).total_seconds()
         logger.info("=" * 60)

@@ -116,7 +116,6 @@ class DeduplicatorStage:
         with self._conn:
             all_known_hashes = self._get_all_hashes([finding.dedup_hash for finding in findings])
             
-            self._purge_expired(cutoff=cutoff, commit=False)
             seen_dict = self._get_recent_hashes(
                 [finding.dedup_hash for finding in findings],
                 cutoff,
@@ -133,6 +132,8 @@ class DeduplicatorStage:
                     # Map issue ID directly from local database
                     issue_id, issue_state = seen_dict[h]
                     finding.redmine_issue_id = issue_id
+                    if issue_state:
+                        finding.issue_state = issue_state
                     
                     # Known from a previous cycle — route to update path
                     finding.dedup_reason = "repeat_within_ttl"
@@ -200,7 +201,7 @@ class DeduplicatorStage:
                 1,
                 1,  # flushed_count
                 getattr(finding, 'redmine_issue_id', None),
-                "open"
+                getattr(finding, 'issue_state', 'open')
             )
             for finding in findings
         ]
@@ -234,7 +235,7 @@ class DeduplicatorStage:
                 finding.occurrence_count,
                 finding.occurrence_count,
                 getattr(finding, 'redmine_issue_id', None),
-                "open"
+                getattr(finding, 'issue_state', 'open')
             )
             for finding in findings
         ]
@@ -254,6 +255,13 @@ class DeduplicatorStage:
                 records
             )
         logger.info("Deduplicator: committed mapped IDs for %d updated findings", len(findings))
+
+    def cleanup(self) -> None:
+        """Garbage collect expired mappings from the SQLite registry. Should run post-output."""
+        if not self.enabled:
+            return
+        cutoff = time.time() - self.ttl_seconds
+        self._purge_expired(cutoff)
 
     def _get_recent_hashes(self, hash_values: list[str], cutoff: float) -> dict[str, tuple[int|None, str|None]]:
         """Fetch hashes seen within the active TTL window in a small number of queries."""
