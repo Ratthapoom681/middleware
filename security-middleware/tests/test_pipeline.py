@@ -5,6 +5,7 @@ Integration test for the full pipeline (with mocked API calls).
 import pytest
 import responses
 
+from src import dashboard_history as dashboard_history_module
 from src.config import (
     AppConfig,
     WazuhConfig,
@@ -59,8 +60,13 @@ def config(workspace_tmp_dir):
 
 
 @responses.activate
-def test_full_pipeline_cycle(config):
+def test_full_pipeline_cycle(config, workspace_tmp_dir, monkeypatch):
     """Test a complete pipeline cycle with mocked API responses."""
+    monkeypatch.setattr(
+        dashboard_history_module,
+        "DEFAULT_LOCAL_HISTORY_PATH",
+        workspace_tmp_dir / "dashboard_events.jsonl",
+    )
 
     # Mock Wazuh auth
     responses.add(
@@ -182,6 +188,10 @@ def test_full_pipeline_cycle(config):
     assert result["ingested"] == 3          # 2 Wazuh + 1 DefectDojo
     assert result["filtered"] >= 1          # Low-level noise should be filtered
     assert result["created"] >= 1           # At least one Redmine issue created
+    history = pipeline.dashboard_history.get_dashboard_history(limit=5)
+    assert history
+    assert history[0]["origin"] == "poll"
+    assert history[0]["stats"]["ingested"] == 3
 
     # Cleanup
-    pipeline.dedup_stage.close()
+    pipeline.close()

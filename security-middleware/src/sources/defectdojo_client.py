@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import urlsplit, urlunsplit
@@ -305,7 +305,7 @@ class DefectDojoClient:
         if checkpoint_state:
             params["last_status_update"] = checkpoint_state["last_status_update"]
         elif self.config.updated_since_minutes > 0:
-            past_time = datetime.utcnow() - timedelta(minutes=self.config.updated_since_minutes)
+            past_time = datetime.now(timezone.utc) - timedelta(minutes=self.config.updated_since_minutes)
             params["last_status_update"] = past_time.strftime("%Y-%m-%dT%H:%M:%SZ")
 
         if self.config.severity_filter:
@@ -404,6 +404,7 @@ class DefectDojoClient:
             "base_url": self.base_url,
             "active": self.config.active,
             "verified": self.config.verified,
+            "updated_since_minutes": self.config.updated_since_minutes,
             "severity_filter": self.config.severity_filter,
             "product_ids": self.config.product_ids,
             "engagement_ids": self.config.engagement_ids,

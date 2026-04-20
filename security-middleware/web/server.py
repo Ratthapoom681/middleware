@@ -30,6 +30,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.main import MiddlewarePipeline
+from src.dashboard_history import create_dashboard_history_store
 from src.state_store import create_state_store
 from src.sources.wazuh_client import WazuhClient
 
@@ -367,19 +368,17 @@ def wazuh_webhook():
 
         # Process the batch ad-hoc
         pipeline = MiddlewarePipeline(config)
-        outcome = pipeline.process_batch(findings)
-        pipeline.dedup_stage.close()
-
-        # Log it to our Dashboard Queue
-        record = {
-            "id": str(uuid.uuid4()),
-            "receive_time": datetime.now(timezone.utc).isoformat(),
-            "alert_count": len(data),
-            "findings": outcome["results"],
-            "stats": outcome["stats"]
-        }
-
-        WEBHOOK_HISTORY.appendleft(record)
+        try:
+            outcome = pipeline.process_batch(
+                findings,
+                event_context={
+                    "origin": "webhook",
+                    "alert_count": len(data),
+                    "source_counts": {"wazuh": len(findings)},
+                },
+            )
+        finally:
+            pipeline.close()
 
         return jsonify({"status": "ok", "stats": outcome["stats"]}), 200
 
@@ -393,7 +392,22 @@ def get_webhook_history():
     """
     Returns the last 200 webhook events for the Live Events Dashboard.
     """
-    return jsonify({"status": "ok", "history": list(WEBHOOK_HISTORY)}), 200
+    try:
+        config = load_config(str(CONFIG_PATH) if CONFIG_PATH.exists() else None)
+        state_store = create_state_store(config.storage)
+        history_store = create_dashboard_history_store(config.storage, state_store)
+        try:
+            history = history_store.get_dashboard_history(limit=200)
+        finally:
+            if history_store is not state_store:
+                history_store.close()
+            if state_store:
+                state_store.close()
+
+        return jsonify({"status": "ok", "history": history}), 200
+    except Exception:
+        logger.exception("Failed to load dashboard history")
+        return jsonify({"status": "ok", "history": list(WEBHOOK_HISTORY)}), 200
 
 
 # ── Webhook Dashboard State ───────────────────────────────────────────

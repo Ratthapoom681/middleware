@@ -18,12 +18,15 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
 # Default config search paths
 DEFAULT_CONFIG_PATHS = [
-    Path("config/config.yaml"),
-    Path("config.yaml"),
+    PROJECT_ROOT / "config" / "config.yaml",
+    PROJECT_ROOT / "config.yaml",
     Path("/etc/security-middleware/config.yaml"),
 ]
+DEFAULT_BACKUP_DIR = PROJECT_ROOT / "config" / "backups"
 
 
 def _normalize_bool(value: Any, default: bool) -> bool:
@@ -448,9 +451,12 @@ def load_config(config_path: Optional[str] = None) -> AppConfig:
         FileNotFoundError: If no config file found.
     """
     path: Optional[Path] = None
+    config_path = config_path or os.environ.get("SECURITY_MIDDLEWARE_CONFIG")
 
     if config_path:
-        path = Path(config_path)
+        path = Path(config_path).expanduser()
+        if not path.is_absolute():
+            path = (PROJECT_ROOT / path).resolve()
         if not path.exists():
             raise FileNotFoundError(f"Config file not found: {config_path}")
     else:
@@ -475,7 +481,7 @@ def load_config(config_path: Optional[str] = None) -> AppConfig:
 
     # Fallback to backups if primary is missing or invalid (and not explicitly passed via CLI)
     if not loaded_successfully and not config_path:
-        backup_dir = Path("config/backups")
+        backup_dir = DEFAULT_BACKUP_DIR
         if backup_dir.exists() and backup_dir.is_dir():
             backups = list(backup_dir.glob("*.yaml"))
             if backups:

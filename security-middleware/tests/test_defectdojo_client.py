@@ -357,6 +357,7 @@ def test_get_finding_count_summary_reports_pending_findings_after_checkpoint(wor
                         "product_ids": [],
                         "severity_filter": ["Critical", "High", "Medium"],
                         "test_ids": [],
+                        "updated_since_minutes": 0,
                         "verified": True,
                     },
                     sort_keys=True,
@@ -459,3 +460,37 @@ def test_checkpoint_store_can_replace_local_cursor_file():
         "last_id": 99,
     }
     assert "defectdojo:state/defectdojo.json" in checkpoint_store.payloads
+
+
+def test_updated_since_minutes_change_invalidates_existing_checkpoint(workspace_tmp_dir):
+    cursor_path = workspace_tmp_dir / f"defectdojo_cursor_{uuid4().hex}.json"
+    cursor_path.write_text(
+        json.dumps(
+            {
+                "signature": json.dumps(
+                    {
+                        "active": True,
+                        "base_url": "http://defectdojo-test/api/v2",
+                        "engagement_ids": [],
+                        "product_ids": [],
+                        "severity_filter": ["Critical", "High", "Medium"],
+                        "test_ids": [],
+                        "updated_since_minutes": 15,
+                        "verified": True,
+                    },
+                    sort_keys=True,
+                ),
+                "last_id": 55,
+                "last_status_update": "2026-04-09T10:00:00Z",
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    client = _make_client(
+        cursor_path=str(cursor_path),
+        updated_since_minutes=60,
+    )
+
+    assert client._load_cursor() is None

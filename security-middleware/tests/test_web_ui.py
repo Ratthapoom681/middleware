@@ -8,6 +8,7 @@ from pathlib import Path
 
 import yaml
 
+from src import dashboard_history as dashboard_history_module
 from src.sources.defectdojo_client import DefectDojoClient
 from web import server
 
@@ -262,3 +263,36 @@ def test_static_ui_assets_reference_new_defectdojo_fields():
         "storage-checkpoint_table",
     ]:
         assert token in html or token in js
+
+
+def test_webhook_history_endpoint_reads_persisted_dashboard_history(workspace_tmp_dir, monkeypatch):
+    config_path = workspace_tmp_dir / "config.yaml"
+    backup_dir = workspace_tmp_dir / "backups"
+    history_path = workspace_tmp_dir / "dashboard_events.jsonl"
+    config_path.write_text(yaml.safe_dump({}), encoding="utf-8")
+
+    monkeypatch.setattr(server, "CONFIG_PATH", config_path)
+    monkeypatch.setattr(server, "BACKUP_DIR", backup_dir)
+    monkeypatch.setattr(dashboard_history_module, "DEFAULT_LOCAL_HISTORY_PATH", history_path)
+
+    history_store = dashboard_history_module.LocalDashboardHistoryStore(history_path)
+    history_store.append_dashboard_event(
+        {
+            "id": "evt-1",
+            "receive_time": "2026-04-20T01:00:00+00:00",
+            "origin": "poll",
+            "alert_count": 3,
+            "source_counts": {"wazuh": 2, "defectdojo": 1},
+            "findings": [],
+            "stats": {"ingested": 3, "created": 1},
+        }
+    )
+
+    with server.app.test_client() as client:
+        response = client.get("/api/webhook/history")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["status"] == "ok"
+    assert payload["history"][0]["origin"] == "poll"
+    assert payload["history"][0]["stats"]["ingested"] == 3

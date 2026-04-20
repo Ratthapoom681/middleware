@@ -15,8 +15,9 @@ import logging
 import signal
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
+from uuid import uuid4
 
 # Ensure the project root is on sys.path so 'web' module is found reliably
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -32,6 +33,7 @@ from src.pipeline.severity_mapper import SeverityMapperStage
 from src.pipeline.deduplicator import DeduplicatorStage
 from src.pipeline.enricher import EnricherStage
 from src.output.redmine_client import RedmineClient
+from src.dashboard_history import create_dashboard_history_store
 from src.state_store import create_state_store
 
 logger = logging.getLogger("middleware")
@@ -56,6 +58,7 @@ class MiddlewarePipeline:
         self.config_path = config_path or config._loaded_path or "config/config.yaml"
         self._last_config_mtime = self._get_config_mtime()
         self.state_store = create_state_store(config.storage)
+        self.dashboard_history = create_dashboard_history_store(config.storage, self.state_store)
 
         # Source clients
         self.wazuh = WazuhClient(config.wazuh)
@@ -87,13 +90,13 @@ class MiddlewarePipeline:
                 from src.config import load_config
                 new_config = load_config(self.config_path)
                 new_state_store = create_state_store(new_config.storage)
+                new_dashboard_history = create_dashboard_history_store(new_config.storage, new_state_store)
 
-                # Gracefully close old dedup DB connection
-                if hasattr(self, 'dedup_stage'):
-                    self.dedup_stage.close()
+                self.close()
 
                 self.config = new_config
                 self.state_store = new_state_store
+                self.dashboard_history = new_dashboard_history
 
                 # Re-initialize all clients with new config
                 self.wazuh = WazuhClient(self.config.wazuh)
@@ -140,7 +143,7 @@ class MiddlewarePipeline:
         Execute a single pipeline cycle:
           fetch → filter → map → dedup → enrich → output
         """
-        cycle_start = datetime.utcnow()
+        cycle_start = datetime.now(timezone.utc)
         logger.info("=" * 60)
         logger.info("Pipeline cycle started at %s", cycle_start.isoformat())
         logger.info("=" * 60)
@@ -176,7 +179,18 @@ class MiddlewarePipeline:
             return {"ingested": 0, "filtered": 0, "deduplicated": 0, "output": 0}
 
         try:
-            outcome = self.process_batch(findings, cycle_start)
+            outcome = self.process_batch(
+                findings,
+                cycle_start,
+                event_context={
+                    "origin": "poll",
+                    "alert_count": len(findings),
+                    "source_counts": {
+                        "wazuh": len(wazuh_findings),
+                        "defectdojo": len(dd_findings),
+                    },
+                },
+            )
         except Exception:
             self.defectdojo.discard_pending_checkpoint()
             raise
@@ -194,14 +208,19 @@ class MiddlewarePipeline:
 
         return outcome["stats"]
 
-    def process_batch(self, findings: list[Finding], cycle_start: datetime = None) -> dict[str, Any]:
+    def process_batch(
+        self,
+        findings: list[Finding],
+        cycle_start: datetime = None,
+        event_context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """
         Process a batch of pre-ingested findings through the pipeline:
           filter → map → dedup → enrich → output
         """
         from typing import Any
         if not cycle_start:
-            cycle_start = datetime.utcnow()
+            cycle_start = datetime.now(timezone.utc)
             
         original_findings = list(findings)
         total_ingested = len(findings)
@@ -275,7 +294,7 @@ class MiddlewarePipeline:
         self.dedup_stage.cleanup()
 
         # --- Summary ---
-        elapsed = (datetime.utcnow() - cycle_start).total_seconds()
+        elapsed = (datetime.now(timezone.utc) - cycle_start).total_seconds()
         logger.info("=" * 60)
         logger.info("Pipeline processing complete in %.1fs", elapsed)
         logger.info(
@@ -314,7 +333,7 @@ class MiddlewarePipeline:
                 "dedup_hash": f.dedup_hash,
             })
 
-        return {
+        outcome = {
             "stats": {
                 "ingested": total_ingested,
                 "filtered": total_ingested - after_filter,
@@ -327,6 +346,8 @@ class MiddlewarePipeline:
             },
             "results": results
         }
+        self._record_dashboard_event(outcome, event_context)
+        return outcome
 
     def run(self) -> None:
         """Run the pipeline in a continuous polling loop."""
@@ -353,15 +374,50 @@ class MiddlewarePipeline:
                 time.sleep(1)
 
         logger.info("Pipeline shutdown complete")
-        self.dedup_stage.close()
+        self.close()
 
     def run_once(self) -> dict[str, int]:
         """Run a single pipeline cycle and exit."""
         logger.info("Running single pipeline cycle...")
         self.test_connections()
         result = self.run_cycle()
-        self.dedup_stage.close()
+        self.close()
         return result
+
+    def _record_dashboard_event(self, outcome: dict[str, Any], event_context: dict[str, Any] | None = None) -> None:
+        """Persist one dashboard event so polling and webhook paths share history."""
+        if not getattr(self, "dashboard_history", None):
+            return
+
+        event_context = event_context or {}
+        record = {
+            "id": str(uuid4()),
+            "receive_time": datetime.now(timezone.utc).isoformat(),
+            "origin": event_context.get("origin", "pipeline"),
+            "alert_count": int(event_context.get("alert_count", outcome["stats"].get("ingested", 0)) or 0),
+            "source_counts": event_context.get("source_counts", {}),
+            "findings": outcome.get("results", []),
+            "stats": outcome.get("stats", {}),
+        }
+        try:
+            self.dashboard_history.append_dashboard_event(record)
+        except Exception as exc:
+            logger.warning("Failed to persist dashboard event: %s", exc)
+
+    def close(self) -> None:
+        """Close open pipeline resources."""
+        if getattr(self, "dashboard_history", None) is not None and self.dashboard_history is not self.state_store:
+            try:
+                self.dashboard_history.close()
+            except Exception:
+                logger.debug("Dashboard history close failed", exc_info=True)
+            self.dashboard_history = None
+
+        if hasattr(self, "dedup_stage") and self.dedup_stage:
+            self.dedup_stage.close()
+            self.dedup_stage = None
+
+        self.state_store = None
 
 
 def main():
@@ -412,6 +468,7 @@ def main():
 
     if args.test:
         success = pipeline.test_connections()
+        pipeline.close()
         sys.exit(0 if success else 1)
 
     if args.once:

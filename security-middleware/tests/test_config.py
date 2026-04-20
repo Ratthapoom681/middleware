@@ -4,7 +4,10 @@ Tests for configuration normalization.
 
 from __future__ import annotations
 
-from src.config import _build_config
+from pathlib import Path
+
+from src import config as config_module
+from src.config import _build_config, load_config
 
 
 def test_build_config_normalizes_legacy_dojo_aliases():
@@ -103,3 +106,25 @@ def test_storage_config_builds_postgres_backend():
     assert config.storage.postgres_schema == "middleware"
     assert config.storage.dedup_table == "seen_hashes"
     assert config.storage.checkpoint_table == "checkpoints"
+
+
+def test_load_config_resolves_relative_paths_from_project_root(workspace_tmp_dir, monkeypatch):
+    project_root = workspace_tmp_dir
+    config_dir = project_root / "config"
+    config_dir.mkdir(parents=True)
+    config_path = config_dir / "config.yaml"
+    config_path.write_text(
+        """
+wazuh:
+  base_url: https://wazuh.example.local:55000
+""".strip(),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(config_module, "PROJECT_ROOT", project_root)
+    monkeypatch.chdir(Path.cwd().anchor)
+
+    loaded = load_config("config/config.yaml")
+
+    assert loaded.wazuh.base_url == "https://wazuh.example.local:55000"
+    assert loaded._loaded_path == str(config_path.resolve())

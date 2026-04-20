@@ -37,6 +37,7 @@ class PostgresStateStore:
         self._schema = _quote_identifier(config.postgres_schema)
         self._dedup_table = _quote_identifier(config.dedup_table)
         self._checkpoint_table = _quote_identifier(config.checkpoint_table)
+        self._dashboard_table = _quote_identifier("middleware_dashboard_events")
         self._conn = self._dbapi.connect(config.postgres_dsn)
         self._init_db()
 
@@ -76,17 +77,41 @@ class PostgresStateStore:
                     )
                     """
                 )
+                cur.execute(
+                    f"""
+                    CREATE TABLE IF NOT EXISTS {self._schema}.{self._dashboard_table} (
+                        event_id TEXT PRIMARY KEY,
+                        receive_time TIMESTAMPTZ NOT NULL,
+                        payload TEXT NOT NULL
+                    )
+                    """
+                )
+                cur.execute(
+                    f"""
+                    CREATE INDEX IF NOT EXISTS {self._dashboard_index_name('receive_time')}
+                    ON {self._schema}.{self._dashboard_table} (receive_time DESC)
+                    """
+                )
         logger.info(
-            "Postgres state store initialized (%s.%s / %s.%s)",
+            "Postgres state store initialized (%s.%s / %s.%s / %s.%s)",
             self.config.postgres_schema,
             self.config.dedup_table,
             self.config.postgres_schema,
             self.config.checkpoint_table,
+            self.config.postgres_schema,
+            "middleware_dashboard_events",
         )
 
     def _dedup_index_name(self, suffix: str) -> str:
         """Build a safe, deterministic index name."""
         raw_name = f"{self.config.dedup_table}_{suffix}_idx"
+        if len(raw_name) > 60:
+            raw_name = raw_name[:60]
+        return _quote_identifier(raw_name)
+
+    def _dashboard_index_name(self, suffix: str) -> str:
+        """Build a safe dashboard index name."""
+        raw_name = f"middleware_dashboard_events_{suffix}_idx"
         if len(raw_name) > 60:
             raw_name = raw_name[:60]
         return _quote_identifier(raw_name)
@@ -138,11 +163,11 @@ class PostgresStateStore:
                     ON CONFLICT (hash) DO UPDATE SET
                         source = EXCLUDED.source,
                         title = EXCLUDED.title,
-                        first_seen = EXCLUDED.first_seen,
-                        last_seen = EXCLUDED.last_seen,
-                        count = EXCLUDED.count,
-                        flushed_count = EXCLUDED.flushed_count,
-                        redmine_issue_id = EXCLUDED.redmine_issue_id,
+                        first_seen = LEAST({self._schema}.{self._dedup_table}.first_seen, EXCLUDED.first_seen),
+                        last_seen = GREATEST({self._schema}.{self._dedup_table}.last_seen, EXCLUDED.last_seen),
+                        count = {self._schema}.{self._dedup_table}.count + EXCLUDED.count,
+                        flushed_count = {self._schema}.{self._dedup_table}.flushed_count + EXCLUDED.flushed_count,
+                        redmine_issue_id = COALESCE({self._schema}.{self._dedup_table}.redmine_issue_id, EXCLUDED.redmine_issue_id),
                         issue_state = EXCLUDED.issue_state
                     """,
                     records,
@@ -228,6 +253,52 @@ class PostgresStateStore:
                     """,
                     (checkpoint_key, signature, serialized),
                 )
+
+    def append_dashboard_event(self, record: dict[str, Any]) -> None:
+        """Persist a dashboard event payload."""
+        event_id = str(record.get("id") or "")
+        receive_time = str(record.get("receive_time") or "")
+        if not event_id or not receive_time:
+            raise ValueError("Dashboard event record requires 'id' and 'receive_time'")
+
+        serialized = json.dumps(record, sort_keys=True)
+        with self._conn:
+            with self._conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    INSERT INTO {self._schema}.{self._dashboard_table}
+                    (event_id, receive_time, payload)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (event_id) DO UPDATE SET
+                        receive_time = EXCLUDED.receive_time,
+                        payload = EXCLUDED.payload
+                    """,
+                    (event_id, receive_time, serialized),
+                )
+
+    def get_dashboard_history(self, limit: int = 200) -> list[dict[str, Any]]:
+        """Return the most recent persisted dashboard events, newest first."""
+        safe_limit = max(1, int(limit))
+        with self._conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT payload
+                FROM {self._schema}.{self._dashboard_table}
+                ORDER BY receive_time DESC
+                LIMIT %s
+                """,
+                (safe_limit,),
+            )
+            rows = cur.fetchall()
+
+        events: list[dict[str, Any]] = []
+        for row in rows:
+            payload = row[0]
+            if isinstance(payload, str):
+                events.append(json.loads(payload))
+            else:
+                events.append(dict(payload))
+        return events
 
     def close(self) -> None:
         """Close the Postgres connection."""
