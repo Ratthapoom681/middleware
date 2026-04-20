@@ -11,7 +11,7 @@ import responses
 
 from src.config import DefectDojoConfig
 from src.models.finding import Severity
-from src.sources.defectdojo_client import DefectDojoClient
+from src.sources.defectdojo_client import DefectDojoAPIError, DefectDojoClient
 
 
 def _make_client(**overrides) -> DefectDojoClient:
@@ -281,3 +281,30 @@ def test_fetch_scope_data_returns_products_engagements_and_tests():
         "engagements": [{"id": 20, "name": "Q2 External", "product_id": 10}],
         "tests": [{"id": 30, "name": "ZAP Weekly", "engagement_id": 20, "product_id": 10}],
     }
+
+
+@responses.activate
+def test_fetch_scope_data_raises_helpful_error_on_non_json_response():
+    client = _make_client()
+
+    responses.add(
+        responses.GET,
+        "http://defectdojo-test/api/v2/products/",
+        body="""
+<!DOCTYPE html>
+<html>
+  <body>login required</body>
+</html>
+""",
+        content_type="text/html",
+        status=200,
+    )
+
+    try:
+        client.fetch_scope_data()
+        assert False, "Expected fetch_scope_data() to raise DefectDojoAPIError"
+    except DefectDojoAPIError as exc:
+        message = str(exc)
+        assert "non-JSON content" in message
+        assert "/products/" in message
+        assert "Base URL points to the UI/login page" in message

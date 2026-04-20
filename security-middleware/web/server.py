@@ -287,11 +287,14 @@ def fetch_defectdojo_scope_data():
         data = request.get_json() or {}
         config = _build_config(data)
 
-        from src.sources.defectdojo_client import DefectDojoClient
+        from src.sources.defectdojo_client import DefectDojoAPIError, DefectDojoClient
 
         client = DefectDojoClient(config.defectdojo)
         scope_data = client.fetch_scope_data()
         return jsonify({"status": "ok", **scope_data})
+    except DefectDojoAPIError as e:
+        logger.warning("DefectDojo scope synchronization failed: %s", e)
+        return jsonify({"status": "error", "message": str(e)}), 400
     except Exception as e:
         logger.exception("DefectDojo scope synchronization failed")
         return jsonify({"status": "error", "message": str(e)}), 500

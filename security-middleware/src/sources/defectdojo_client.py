@@ -42,6 +42,10 @@ _PLUGIN_TAG_RE = re.compile(
 _UI_API_SUFFIX_RE = re.compile(r"/api(?:/v\d+)?/?$", re.IGNORECASE)
 
 
+class DefectDojoAPIError(RuntimeError):
+    """Raised when DefectDojo returns an unexpected API response."""
+
+
 def _clean_text(value: Any) -> str:
     """Normalize arbitrary scalar values into stripped strings."""
     if value is None:
@@ -155,25 +159,7 @@ class DefectDojoClient:
         try:
             while True:
                 response = self.session.get(url, params=params, timeout=60)
-                response.raise_for_status()
-
-                content_type = response.headers.get("Content-Type", "")
-                if "application/json" not in content_type:
-                    logger.error(
-                        "DefectDojo: expected JSON but got '%s'. Response body (first 500 chars): %s",
-                        content_type,
-                        response.text[:500],
-                    )
-                    break
-
-                try:
-                    data = response.json()
-                except ValueError:
-                    logger.error(
-                        "DefectDojo: failed to parse JSON. Response (first 500 chars): %s",
-                        response.text[:500],
-                    )
-                    break
+                data = self._parse_json_response(response, f"findings page offset={params['offset']}")
 
                 results = data.get("results", [])
                 logger.info(
@@ -207,7 +193,7 @@ class DefectDojoClient:
                 else:
                     break
 
-        except RequestException as exc:
+        except (RequestException, DefectDojoAPIError) as exc:
             logger.error("DefectDojo: failed to fetch findings: %s", exc)
 
         if next_checkpoint_state and findings:
@@ -285,8 +271,7 @@ class DefectDojoClient:
 
         while True:
             response = self.session.get(url, params=params, timeout=30)
-            response.raise_for_status()
-            data = response.json()
+            data = self._parse_json_response(response, path)
             results = data.get("results", [])
             items.extend(result for result in results if isinstance(result, dict))
 
@@ -295,6 +280,40 @@ class DefectDojoClient:
             params["offset"] += params["limit"]
 
         return items
+
+    def _parse_json_response(self, response: requests.Response, context: str) -> dict[str, Any]:
+        """Validate that an upstream response is JSON and return the parsed body."""
+        try:
+            response.raise_for_status()
+        except RequestException as exc:
+            raise DefectDojoAPIError(
+                f"DefectDojo request failed for {context}: HTTP {response.status_code}"
+            ) from exc
+
+        content_type = response.headers.get("Content-Type", "")
+        body_preview = response.text[:500].strip()
+        if "application/json" not in content_type.lower():
+            raise DefectDojoAPIError(
+                "DefectDojo returned non-JSON content for "
+                f"{context} ({content_type or 'unknown content type'}). "
+                "This usually means the Base URL points to the UI/login page, "
+                "the API key is invalid, or a proxy/WAF returned an HTML error page. "
+                f"Response preview: {body_preview or '<empty>'}"
+            )
+
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise DefectDojoAPIError(
+                "DefectDojo returned malformed JSON for "
+                f"{context}. Response preview: {body_preview or '<empty>'}"
+            ) from exc
+
+        if not isinstance(data, dict):
+            raise DefectDojoAPIError(
+                f"DefectDojo returned an unexpected JSON shape for {context}: {type(data).__name__}"
+            )
+        return data
 
     def _extract_related_id(self, item: dict[str, Any], field_name: str) -> int | None:
         """Extract a related object ID from either an integer or expanded object."""
