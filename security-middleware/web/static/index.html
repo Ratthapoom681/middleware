@@ -523,11 +523,16 @@
                 <div class="form-group">
                     <label>Rule Format <span class="hint">(JSON array, saved as YAML)</span></label>
                     <div class="toggle-desc" style="padding-top: 30px;">
-                        Match against raw Wazuh or DefectDojo payload paths like <code>decoder.name</code>, <code>rule.groups</code>, or <code>data.srcip</code>.
+                        Match against raw Wazuh or DefectDojo payload paths like <code>decoder.name</code>, <code>rule.groups</code>, <code>data.srcip</code>, <code>finding.found_by</code>, or <code>endpoints[0].host</code>.
                     </div>
                 </div>
                 <div class="form-group full-width">
                     <label>JSON Rules</label>
+                    <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px;">
+                        <button type="button" class="btn btn-sm" id="filter-example-fortigate">Load Fortigate Example</button>
+                        <button type="button" class="btn btn-sm" id="filter-example-wazuh-drop">Load Drop Example</button>
+                        <button type="button" class="btn btn-sm" id="filter-example-defectdojo">Load DefectDojo Example</button>
+                    </div>
                     <textarea id="filter-json_rules" placeholder='[
   {
     "name": "keep-fortigate-attacks",
@@ -543,6 +548,15 @@
 ]'></textarea>
                     <div class="toggle-desc">
                         Supported operators: <code>equals</code>, <code>not_equals</code>, <code>contains</code>, <code>regex</code>, <code>in</code>, <code>not_in</code>, <code>gt</code>, <code>gte</code>, <code>lt</code>, <code>lte</code>, <code>exists</code>.
+                    </div>
+                    <div class="toggle-desc" style="margin-top:8px;">
+                        Quick tips: use <code>match: "all"</code> when every condition must match, use <code>match: "any"</code> when one condition is enough, and remember <code>contains</code> is useful for arrays like <code>rule.groups</code>.
+                    </div>
+                    <div class="toggle-desc" style="margin-top:8px;">
+                        Common Wazuh paths: <code>rule.id</code>, <code>rule.groups</code>, <code>decoder.name</code>, <code>agent.name</code>, <code>data.srcip</code>, <code>data.dstport</code>, <code>data.service</code>, <code>data.count</code>.
+                    </div>
+                    <div class="toggle-desc" style="margin-top:8px;">
+                        Common DefectDojo paths: <code>finding.found_by</code>, <code>finding.severity</code>, <code>finding.cwe</code>, <code>finding.component_name</code>, <code>endpoints[0].host</code>, <code>endpoints[0].path</code>.
                     </div>
                 </div>
             </div>

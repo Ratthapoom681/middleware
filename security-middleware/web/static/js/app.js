@@ -7,6 +7,52 @@ const defectDojoScopeData = {
     tests: [],
 };
 let latestWebhookHistory = [];
+const JSON_RULE_EXAMPLES = {
+    fortigate: [
+        {
+            name: 'keep-fortigate-dns-anomaly',
+            enabled: true,
+            source: 'wazuh',
+            action: 'keep',
+            match: 'all',
+            conditions: [
+                { path: 'decoder.name', op: 'equals', value: 'fortigate-firewall-v6' },
+                { path: 'rule.groups', op: 'contains', value: 'attack' },
+                { path: 'data.attack', op: 'equals', value: 'udp_dst_session' },
+                { path: 'data.service', op: 'equals', value: 'DNS' },
+                { path: 'data.count', op: 'gte', value: 5000 },
+            ],
+        },
+    ],
+    wazuhDrop: [
+        {
+            name: 'drop-low-volume-port-scans',
+            enabled: true,
+            source: 'wazuh',
+            action: 'drop',
+            match: 'all',
+            conditions: [
+                { path: 'rule.groups', op: 'contains', value: 'attack' },
+                { path: 'data.service', op: 'equals', value: 'DNS' },
+                { path: 'data.count', op: 'lt', value: 100 },
+            ],
+        },
+    ],
+    defectdojo: [
+        {
+            name: 'keep-tenable-critical-web-findings',
+            enabled: true,
+            source: 'defectdojo',
+            action: 'keep',
+            match: 'all',
+            conditions: [
+                { path: 'finding.found_by', op: 'equals', value: 'Tenable Scan' },
+                { path: 'finding.severity', op: 'in', value: ['Critical', 'High'] },
+                { path: 'endpoints[0].host', op: 'exists', value: true },
+            ],
+        },
+    ],
+};
 
 // ── Navigation ─────────────────────────────────────────────────
 const sectionTitles = {
@@ -230,6 +276,22 @@ function getJsonTextareaValue(id, fallback) {
     } catch (e) {
         throw new Error(`Invalid JSON in ${id}: ${e.message}`);
     }
+}
+
+function loadJsonRuleExample(exampleName) {
+    const textarea = document.getElementById('filter-json_rules');
+    const example = JSON_RULE_EXAMPLES[exampleName];
+    if (!textarea || !example) return;
+
+    const rendered = JSON.stringify(example, null, 2);
+    const current = (textarea.value || '').trim();
+    const hasMeaningfulContent = current && current !== '[]' && current !== rendered;
+    if (hasMeaningfulContent && !window.confirm('Replace the current JSON rules with this example?')) {
+        return;
+    }
+
+    textarea.value = rendered;
+    toast('Loaded JSON rule example. Adjust it to fit your alerts before saving.', 'success');
 }
 
 // ── Collect Form → Config Object ───────────────────────────────
@@ -1552,6 +1614,14 @@ async function restoreBackup(filename) {
 ['dashboard-range', 'dashboard-metric', 'dashboard-chart-type', 'dashboard-bucket'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.addEventListener('change', () => renderDashboard(latestWebhookHistory));
+});
+[
+    ['filter-example-fortigate', 'fortigate'],
+    ['filter-example-wazuh-drop', 'wazuhDrop'],
+    ['filter-example-defectdojo', 'defectdojo'],
+].forEach(([id, exampleName]) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('click', () => loadJsonRuleExample(exampleName));
 });
 renderDashboard([]);
 loadConfig();
