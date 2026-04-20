@@ -138,6 +138,33 @@ def test_tenable_plugin_id_falls_back_to_vulnerability_id_and_tags():
     assert finding.cve_ids == ["CVE-2024-1111"]
 
 
+def test_null_text_fields_do_not_break_defectdojo_identity_parsing():
+    client = _make_client()
+    raw_finding = {
+        "id": 46,
+        "title": None,
+        "severity": "High",
+        "description": None,
+        "date": "2026-04-09",
+        "test_type_name": None,
+        "component_name": None,
+        "component_version": None,
+        "mitigation": None,
+        "references": None,
+        "endpoints": [],
+        "tags": [],
+        "vulnerability_ids": [],
+    }
+
+    finding = client._finding_to_model(raw_finding)
+
+    assert finding is not None
+    assert finding.title == "DefectDojo Finding"
+    assert finding.component == ""
+    assert finding.component_version == ""
+    assert finding.found_by == ""
+
+
 @responses.activate
 def test_fetch_limit_uses_checkpoint_and_does_not_advance_until_committed(workspace_tmp_dir):
     cursor_path = workspace_tmp_dir / f"defectdojo_cursor_{uuid4().hex}.json"

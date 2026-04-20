@@ -6,20 +6,29 @@ Maintains separated `dedup_hash` derivation and `routing_key` formatting strateg
 """
 
 import hashlib
+from typing import Any
+
 from src.models.finding import Finding, FindingSource
 
 # Hash version bumped to v2 to enforce new srcip/endpoint separation schema.
 DEDUP_NAMESPACE = "v3"
 
 
-def _normalized_text(value: str) -> str:
+def _normalized_text(value: Any) -> str:
     """Normalize a string token for stable identity composition."""
-    return value.strip().lower()
+    if value is None:
+        return ""
+    return str(value).strip().lower()
 
 
 def _normalized_csv(values: list[str]) -> str:
     """Normalize and sort list values for deterministic identity keys."""
-    normalized = sorted({_normalized_text(value) for value in values if value and value.strip()})
+    normalized = sorted({
+        normalized_value
+        for value in values
+        for normalized_value in [_normalized_text(value)]
+        if normalized_value
+    })
     return ",".join(normalized)
 
 
@@ -42,7 +51,7 @@ def _generic_asset_key(finding: Finding, normalized_endpoints: str) -> str:
     """Choose a stable asset/component discriminator for non-specialized scanners."""
     if normalized_endpoints:
         return normalized_endpoints
-    if finding.host.strip():
+    if _normalized_text(finding.host):
         return _normalized_text(finding.host)
     component_key = f"{_normalized_text(finding.component)}:{_normalized_text(finding.component_version)}"
     if component_key != ":":

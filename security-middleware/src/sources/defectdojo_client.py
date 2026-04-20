@@ -515,6 +515,12 @@ class DefectDojoClient:
             severity_str = dd_finding.get("severity", "Info")
             severity_key = _clean_text(severity_str).lower()
             severity = DD_SEVERITY_MAP.get(severity_key, Severity.INFO)
+            title = _clean_text(dd_finding.get("title")) or "DefectDojo Finding"
+            description = _clean_text(dd_finding.get("description")) or "No description"
+            component_name = _clean_text(dd_finding.get("component_name"))
+            component_version = _clean_text(dd_finding.get("component_version"))
+            mitigation = _clean_text(dd_finding.get("mitigation"))
+            references = _clean_text(dd_finding.get("references"))
 
             vulnerability_entries = self._collect_vulnerability_id_entries(dd_finding)
             cve_ids = sorted({
@@ -534,18 +540,18 @@ class DefectDojoClient:
                 timestamp = datetime.utcnow()
 
             desc_parts = [
-                dd_finding.get("description", "No description"),
+                description,
                 "",
                 f"**Severity:** {severity_str}",
-                f"**Component:** {dd_finding.get('component_name', 'N/A')} {dd_finding.get('component_version', '')}".rstrip(),
+                f"**Component:** {component_name or 'N/A'} {component_version}".rstrip(),
             ]
 
             if dd_finding.get("cvssv3"):
                 desc_parts.append(f"**CVSS v3:** {dd_finding['cvssv3']}")
-            if dd_finding.get("mitigation"):
-                desc_parts.append(f"\n**Mitigation:**\n{dd_finding['mitigation']}")
-            if dd_finding.get("references"):
-                desc_parts.append(f"\n**References:**\n{dd_finding['references']}")
+            if mitigation:
+                desc_parts.append(f"\n**Mitigation:**\n{mitigation}")
+            if references:
+                desc_parts.append(f"\n**References:**\n{references}")
 
             tags = list(dd_finding.get("tags", []))
             if dd_finding.get("test_type_name"):
@@ -558,15 +564,15 @@ class DefectDojoClient:
             finding = Finding(
                 source=FindingSource.DEFECTDOJO,
                 source_id=str(dd_finding.get("id", "unknown")),
-                title=dd_finding.get("title", "DefectDojo Finding"),
+                title=title,
                 description="\n".join(desc_parts),
                 severity=severity,
                 raw_severity=severity_str,
                 host=host,
                 endpoints=normalized_endpoints,
                 endpoint_url=endpoint_url,
-                component=dd_finding.get("component_name", ""),
-                component_version=dd_finding.get("component_version", ""),
+                component=component_name,
+                component_version=component_version,
                 cwe=str(dd_finding.get("cwe", "")) if dd_finding.get("cwe") else "",
                 param=_clean_text(dd_finding.get("param")),
                 found_by=found_by,
