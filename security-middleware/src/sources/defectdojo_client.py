@@ -771,7 +771,7 @@ class DefectDojoClient:
                 params={"limit": 1},
                 timeout=10,
             )
-            response.raise_for_status()
+            self._parse_json_response(response, "/user_contact_infos/")
             logger.info("DefectDojo: connection test successful")
             return True
         except Exception as exc:

@@ -308,3 +308,23 @@ def test_fetch_scope_data_raises_helpful_error_on_non_json_response():
         assert "non-JSON content" in message
         assert "/products/" in message
         assert "Base URL points to the UI/login page" in message
+
+
+@responses.activate
+def test_test_connection_rejects_html_login_page():
+    client = _make_client()
+
+    responses.add(
+        responses.GET,
+        "http://defectdojo-test/api/v2/user_contact_infos/",
+        body="""
+<!DOCTYPE html>
+<html>
+  <head><title>DefectDojo</title></head>
+</html>
+""",
+        content_type="text/html",
+        status=200,
+    )
+
+    assert client.test_connection() is False
