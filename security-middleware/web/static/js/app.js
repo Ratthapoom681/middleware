@@ -191,6 +191,11 @@ function populateForm(c) {
     setVal('enrichment-asset_inventory_path', c.pipeline?.enrichment?.asset_inventory_path);
 
     // Logging
+    setVal('storage-backend', c.storage?.backend || 'local');
+    setVal('storage-postgres_dsn', c.storage?.postgres_dsn);
+    setVal('storage-postgres_schema', c.storage?.postgres_schema || 'public');
+    setVal('storage-dedup_table', c.storage?.dedup_table || 'middleware_seen_hashes');
+    setVal('storage-checkpoint_table', c.storage?.checkpoint_table || 'middleware_checkpoints');
     setVal('logging-level', c.logging?.level);
     setVal('logging-format', c.logging?.format);
     setVal('pipeline-poll_interval', c.pipeline?.poll_interval);
@@ -300,6 +305,14 @@ function collectForm() {
                 asset_inventory_path:    getVal('enrichment-asset_inventory_path'),
                 add_remediation_links:   getChecked('enrichment-add_remediation_links'),
             },
+        },
+        storage: {
+            ...(base.storage || {}),
+            backend:          getVal('storage-backend') || 'local',
+            postgres_dsn:     getVal('storage-postgres_dsn'),
+            postgres_schema:  getVal('storage-postgres_schema') || 'public',
+            dedup_table:      getVal('storage-dedup_table') || 'middleware_seen_hashes',
+            checkpoint_table: getVal('storage-checkpoint_table') || 'middleware_checkpoints',
         },
         logging: {
             ...(base.logging || {}),

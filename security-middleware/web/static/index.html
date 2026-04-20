@@ -636,6 +636,40 @@
         </div>
 
         <div class="card">
+            <div class="card-title">Shared State Storage</div>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>Backend</label>
+                    <select id="storage-backend">
+                        <option value="local">Local (SQLite + File Checkpoints)</option>
+                        <option value="postgres">Postgres (Shared State)</option>
+                    </select>
+                </div>
+                <div class="form-group full-width">
+                    <label>Postgres DSN <span class="hint">(used when backend = postgres)</span></label>
+                    <input type="password" id="storage-postgres_dsn" placeholder="postgresql://middleware:secret@db/security">
+                </div>
+                <div class="form-group">
+                    <label>Schema</label>
+                    <input type="text" id="storage-postgres_schema" placeholder="public">
+                </div>
+                <div class="form-group">
+                    <label>Dedup Table</label>
+                    <input type="text" id="storage-dedup_table" placeholder="middleware_seen_hashes">
+                </div>
+                <div class="form-group">
+                    <label>Checkpoint Table</label>
+                    <input type="text" id="storage-checkpoint_table" placeholder="middleware_checkpoints">
+                </div>
+                <div class="form-group full-width">
+                    <div class="toggle-desc">
+                        Shared state moves dedup hashes and DefectDojo checkpoints into Postgres so multiple middleware instances can coordinate safely.
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
             <div class="card-title">Logging Configuration</div>
             <div class="form-grid">
                 <div class="form-group">

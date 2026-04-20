@@ -215,11 +215,15 @@ def test_config_api_round_trips_storage_backend(workspace_tmp_dir, monkeypatch):
         assert payload["storage"]["backend"] == "postgres"
         assert payload["storage"]["postgres_dsn"] == "postgresql://middleware:secret@db/security"
 
+        payload["storage"]["postgres_schema"] = "analytics"
+        payload["storage"]["dedup_table"] = "dedup_state"
         save_response = client.post("/api/config", json=payload)
         assert save_response.get_json()["status"] == "ok"
 
         saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
         assert saved["storage"]["backend"] == "postgres"
+        assert saved["storage"]["postgres_schema"] == "analytics"
+        assert saved["storage"]["dedup_table"] == "dedup_state"
         assert saved["storage"]["checkpoint_table"] == "checkpoints"
 
 
@@ -242,5 +246,10 @@ def test_static_ui_assets_reference_new_defectdojo_fields():
         "filter-default_action",
         "filter-json_rules",
         "getJsonTextareaValue",
+        "storage-backend",
+        "storage-postgres_dsn",
+        "storage-postgres_schema",
+        "storage-dedup_table",
+        "storage-checkpoint_table",
     ]:
         assert token in html or token in js
