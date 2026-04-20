@@ -514,6 +514,159 @@
         .conn-status.fail    { background: var(--red-bg); color: var(--red); }
         .conn-status.pending { background: var(--orange-bg); color: var(--orange); }
 
+        /* ── Dashboard ──────────────────────────────────────── */
+        .dashboard-note {
+            color: var(--text-secondary);
+            font-size: 12px;
+            margin-bottom: 18px;
+        }
+
+        .dashboard-control-grid {
+            align-items: end;
+        }
+
+        .dashboard-stat-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 14px;
+            margin-bottom: 20px;
+        }
+
+        .dashboard-stat-card {
+            background: linear-gradient(180deg, rgba(59,130,246,.08), rgba(6,182,212,.03));
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 18px;
+        }
+
+        .dashboard-stat-label {
+            color: var(--text-secondary);
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: .06em;
+            margin-bottom: 10px;
+        }
+
+        .dashboard-stat-value {
+            color: var(--text-primary);
+            font-size: 28px;
+            font-weight: 700;
+            letter-spacing: -.03em;
+        }
+
+        .dashboard-chart-shell {
+            position: relative;
+            min-height: 280px;
+            background: linear-gradient(180deg, rgba(11,14,20,.45), rgba(17,22,33,.8));
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            overflow: hidden;
+        }
+
+        .dashboard-chart {
+            width: 100%;
+            height: 280px;
+            display: block;
+        }
+
+        .dashboard-empty-state {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-muted);
+            font-size: 13px;
+            text-align: center;
+            padding: 20px;
+        }
+
+        .dashboard-chart-meta {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            margin-top: 12px;
+            color: var(--text-secondary);
+            font-size: 12px;
+            flex-wrap: wrap;
+        }
+
+        .dashboard-toplists {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 18px;
+        }
+
+        .dashboard-subtitle {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: .06em;
+        }
+
+        .dashboard-pill-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .dashboard-pill,
+        .dashboard-empty-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 7px 10px;
+            border-radius: 999px;
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            font-size: 12px;
+        }
+
+        .dashboard-pill strong {
+            color: var(--accent);
+            font-weight: 700;
+        }
+
+        .dashboard-empty-pill {
+            color: var(--text-muted);
+        }
+
+        .dashboard-grid-line {
+            stroke: rgba(139,149,168,.15);
+            stroke-width: 1;
+        }
+
+        .dashboard-axis-label {
+            fill: var(--text-muted);
+            font-size: 11px;
+            font-family: 'Inter', -apple-system, sans-serif;
+        }
+
+        .dashboard-line {
+            fill: none;
+            stroke: var(--accent);
+            stroke-width: 3;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        .dashboard-area {
+            fill: rgba(59,130,246,.12);
+            stroke: none;
+        }
+
+        .dashboard-point {
+            fill: var(--cyan);
+            stroke: var(--bg-surface);
+            stroke-width: 2;
+        }
+
+        .dashboard-bar {
+            fill: rgba(59,130,246,.75);
+        }
+
         /* ── YAML Preview ────────────────────────────────────── */
         .yaml-preview {
             background: var(--bg-input);
@@ -540,4 +693,5 @@
             .sidebar { width: 220px; }
             .main { margin-left: 220px; padding: 24px; }
             .form-grid { grid-template-columns: 1fr; }
+            .dashboard-chart-meta { flex-direction: column; }
         }

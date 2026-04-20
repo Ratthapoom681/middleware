@@ -60,6 +60,10 @@
 
         <div class="nav-group">
             <div class="nav-group-label">Monitoring</div>
+            <div class="nav-item" data-section="dashboard">
+                <span class="nav-icon">&#128200;</span>
+                Dashboard
+            </div>
             <div class="nav-item" data-section="live">
                 <span class="nav-icon">&#128373;</span>
                 Live Events
@@ -702,6 +706,131 @@
                 </span>
             </div>
             <textarea class="yaml-preview" id="yaml-output" spellcheck="false" style="width:100%; height:500px; resize:vertical; background:var(--bg-input); color:var(--text-primary);"></textarea>
+        </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════ -->
+    <!--                  DASHBOARD SECTION                       -->
+    <!-- ════════════════════════════════════════════════════════ -->
+    <div class="section-page" id="page-dashboard">
+        <div class="card">
+            <div class="card-title">
+                Operations Dashboard
+                <span class="badge badge-purple">Recent History</span>
+            </div>
+            <div class="dashboard-note">
+                Based on recent in-memory webhook history from this running middleware process. The current view keeps up to 200 webhook batches since the last restart.
+            </div>
+            <div class="form-grid dashboard-control-grid">
+                <div class="form-group">
+                    <label>Time Range</label>
+                    <select id="dashboard-range">
+                        <option value="15m">Last 15 minutes</option>
+                        <option value="1h">Last 1 hour</option>
+                        <option value="6h">Last 6 hours</option>
+                        <option value="24h" selected>Last 24 hours</option>
+                        <option value="7d">Last 7 days</option>
+                        <option value="all">All loaded history</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Metric</label>
+                    <select id="dashboard-metric">
+                        <option value="alerts">Alerts Received</option>
+                        <option value="created">Tickets Created</option>
+                        <option value="updated">Tickets Updated</option>
+                        <option value="filtered">Filtered Findings</option>
+                        <option value="deduplicated">Deduplicated Findings</option>
+                        <option value="failed">Failures</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Chart Type</label>
+                    <select id="dashboard-chart-type">
+                        <option value="line">Line</option>
+                        <option value="bar">Bar</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Bucket Size</label>
+                    <select id="dashboard-bucket">
+                        <option value="auto">Auto</option>
+                        <option value="1m">1 minute</option>
+                        <option value="5m">5 minutes</option>
+                        <option value="15m">15 minutes</option>
+                        <option value="1h">1 hour</option>
+                        <option value="6h">6 hours</option>
+                        <option value="1d">1 day</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <div class="dashboard-stat-grid">
+            <div class="dashboard-stat-card">
+                <div class="dashboard-stat-label">Webhook Batches</div>
+                <div class="dashboard-stat-value" id="dashboard-stat-batches">0</div>
+            </div>
+            <div class="dashboard-stat-card">
+                <div class="dashboard-stat-label">Alerts Received</div>
+                <div class="dashboard-stat-value" id="dashboard-stat-alerts">0</div>
+            </div>
+            <div class="dashboard-stat-card">
+                <div class="dashboard-stat-label">Tickets Created</div>
+                <div class="dashboard-stat-value" id="dashboard-stat-created">0</div>
+            </div>
+            <div class="dashboard-stat-card">
+                <div class="dashboard-stat-label">Tickets Updated</div>
+                <div class="dashboard-stat-value" id="dashboard-stat-updated">0</div>
+            </div>
+            <div class="dashboard-stat-card">
+                <div class="dashboard-stat-label">Filtered</div>
+                <div class="dashboard-stat-value" id="dashboard-stat-filtered">0</div>
+            </div>
+            <div class="dashboard-stat-card">
+                <div class="dashboard-stat-label">Deduplicated</div>
+                <div class="dashboard-stat-value" id="dashboard-stat-deduplicated">0</div>
+            </div>
+            <div class="dashboard-stat-card">
+                <div class="dashboard-stat-label">Failed</div>
+                <div class="dashboard-stat-value" id="dashboard-stat-failed">0</div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Trend</div>
+            <div class="dashboard-chart-shell">
+                <svg id="dashboard-chart" class="dashboard-chart" viewBox="0 0 760 260" preserveAspectRatio="none" role="img" aria-label="Webhook activity trend chart"></svg>
+                <div id="dashboard-chart-empty" class="dashboard-empty-state">Awaiting webhook events to draw the chart.</div>
+            </div>
+            <div class="dashboard-chart-meta">
+                <div id="dashboard-chart-caption">No recent events yet.</div>
+                <div id="dashboard-last-updated">Waiting for data</div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Top Activity</div>
+            <div class="dashboard-toplists">
+                <div>
+                    <div class="dashboard-subtitle">Sources</div>
+                    <div id="dashboard-top-sources" class="dashboard-pill-list">
+                        <span class="dashboard-empty-pill">No data yet</span>
+                    </div>
+                </div>
+                <div>
+                    <div class="dashboard-subtitle">Actions</div>
+                    <div id="dashboard-top-actions" class="dashboard-pill-list">
+                        <span class="dashboard-empty-pill">No data yet</span>
+                    </div>
+                </div>
+                <div>
+                    <div class="dashboard-subtitle">Rules</div>
+                    <div id="dashboard-top-rules" class="dashboard-pill-list">
+                        <span class="dashboard-empty-pill">No data yet</span>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 

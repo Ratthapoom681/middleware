@@ -232,6 +232,15 @@ def test_static_ui_assets_reference_new_defectdojo_fields():
     js = (server.PROJECT_ROOT / "web" / "static" / "js" / "app.js").read_text(encoding="utf-8")
 
     for token in [
+        "data-section=\"dashboard\"",
+        "page-dashboard",
+        "dashboard-range",
+        "dashboard-metric",
+        "dashboard-chart-type",
+        "dashboard-bucket",
+        "dashboard-chart",
+        "dashboard-top-sources",
+        "renderDashboard",
         "defectdojo-active",
         "defectdojo-verified",
         "defectdojo-updated_since_minutes",
