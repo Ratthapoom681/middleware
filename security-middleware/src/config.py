@@ -197,6 +197,93 @@ class FilterConfig:
     exclude_rule_ids: list[str] = field(default_factory=list)
     include_hosts: list[str] = field(default_factory=list)
     exclude_title_patterns: list[str] = field(default_factory=list)
+    default_action: str = "keep"
+    json_rules: list["JSONFilterRuleConfig"] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        self.min_severity = str(self.min_severity or "low").strip().lower() or "low"
+        self.exclude_rule_ids = _normalize_string_list(self.exclude_rule_ids)
+        self.include_hosts = _normalize_string_list(self.include_hosts)
+        self.exclude_title_patterns = _normalize_string_list(self.exclude_title_patterns)
+
+        self.default_action = str(self.default_action or "keep").strip().lower() or "keep"
+        if self.default_action not in {"keep", "drop"}:
+            raise ValueError("pipeline.filter.default_action must be 'keep' or 'drop'")
+
+        normalized_rules: list[JSONFilterRuleConfig] = []
+        for rule in self.json_rules or []:
+            if isinstance(rule, JSONFilterRuleConfig):
+                normalized_rules.append(rule)
+            elif isinstance(rule, dict):
+                normalized_rules.append(JSONFilterRuleConfig(**rule))
+            else:
+                raise ValueError("pipeline.filter.json_rules entries must be objects")
+        self.json_rules = normalized_rules
+
+
+@dataclass
+class JSONFilterConditionConfig:
+    path: str = ""
+    op: str = "equals"
+    value: Any = None
+
+    def __post_init__(self) -> None:
+        self.path = str(self.path or "").strip()
+        if not self.path:
+            raise ValueError("pipeline.filter.json_rules conditions require a non-empty path")
+
+        self.op = str(self.op or "equals").strip().lower() or "equals"
+        valid_ops = {
+            "equals",
+            "not_equals",
+            "contains",
+            "regex",
+            "in",
+            "not_in",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "exists",
+        }
+        if self.op not in valid_ops:
+            raise ValueError(
+                f"pipeline.filter.json_rules condition operator '{self.op}' is not supported"
+            )
+
+
+@dataclass
+class JSONFilterRuleConfig:
+    name: str = ""
+    enabled: bool = True
+    source: str = "any"  # wazuh, defectdojo, any
+    action: str = "drop"  # keep, drop
+    match: str = "all"  # all, any
+    conditions: list[JSONFilterConditionConfig] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        self.name = str(self.name or "").strip()
+        self.enabled = _normalize_bool(self.enabled, True)
+        self.source = str(self.source or "any").strip().lower() or "any"
+        self.action = str(self.action or "drop").strip().lower() or "drop"
+        self.match = str(self.match or "all").strip().lower() or "all"
+
+        if self.source not in {"wazuh", "defectdojo", "any"}:
+            raise ValueError("pipeline.filter.json_rules source must be 'wazuh', 'defectdojo', or 'any'")
+        if self.action not in {"keep", "drop"}:
+            raise ValueError("pipeline.filter.json_rules action must be 'keep' or 'drop'")
+        if self.match not in {"all", "any"}:
+            raise ValueError("pipeline.filter.json_rules match must be 'all' or 'any'")
+
+        normalized_conditions: list[JSONFilterConditionConfig] = []
+        for condition in self.conditions or []:
+            if isinstance(condition, JSONFilterConditionConfig):
+                normalized_conditions.append(condition)
+            elif isinstance(condition, dict):
+                normalized_conditions.append(JSONFilterConditionConfig(**condition))
+            else:
+                raise ValueError("pipeline.filter.json_rules conditions must be objects")
+        self.conditions = normalized_conditions
 
 
 @dataclass

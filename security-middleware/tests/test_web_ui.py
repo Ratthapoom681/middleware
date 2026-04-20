@@ -134,6 +134,58 @@ def test_defectdojo_finding_count_endpoint_returns_preview_summary(monkeypatch):
         }
 
 
+def test_config_api_round_trips_advanced_filter_rules(workspace_tmp_dir, monkeypatch):
+    config_path = workspace_tmp_dir / "config.yaml"
+    backup_dir = workspace_tmp_dir / "backups"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "pipeline": {
+                    "filter": {
+                        "min_severity": "info",
+                        "default_action": "drop",
+                        "json_rules": [
+                            {
+                                "name": "keep-fortigate-attacks",
+                                "enabled": True,
+                                "source": "wazuh",
+                                "action": "keep",
+                                "match": "all",
+                                "conditions": [
+                                    {"path": "decoder.name", "op": "equals", "value": "fortigate-firewall-v6"},
+                                    {"path": "rule.groups", "op": "contains", "value": "attack"},
+                                ],
+                            }
+                        ],
+                    }
+                }
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(server, "CONFIG_PATH", config_path)
+    monkeypatch.setattr(server, "BACKUP_DIR", backup_dir)
+
+    with server.app.test_client() as client:
+        response = client.get("/api/config")
+        payload = response.get_json()["config"]
+
+        assert payload["pipeline"]["filter"]["default_action"] == "drop"
+        assert payload["pipeline"]["filter"]["json_rules"][0]["name"] == "keep-fortigate-attacks"
+
+        payload["pipeline"]["filter"]["json_rules"][0]["conditions"].append(
+            {"path": "data.count", "op": "gte", "value": 5000}
+        )
+        save_response = client.post("/api/config", json=payload)
+
+        assert save_response.get_json()["status"] == "ok"
+        saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        assert saved["pipeline"]["filter"]["default_action"] == "drop"
+        assert len(saved["pipeline"]["filter"]["json_rules"][0]["conditions"]) == 3
+
+
 def test_static_ui_assets_reference_new_defectdojo_fields():
     html = (server.PROJECT_ROOT / "web" / "static" / "index.html").read_text(encoding="utf-8")
     js = (server.PROJECT_ROOT / "web" / "static" / "js" / "app.js").read_text(encoding="utf-8")
@@ -150,5 +202,8 @@ def test_static_ui_assets_reference_new_defectdojo_fields():
         "previewDefectDojoFindingCount",
         "renderDefectDojoWarnings",
         "defectdojo-finding-count-summary",
+        "filter-default_action",
+        "filter-json_rules",
+        "getJsonTextareaValue",
     ]:
         assert token in html or token in js

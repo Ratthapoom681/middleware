@@ -505,6 +505,44 @@
                 </div>
             </div>
         </div>
+
+        <div class="card">
+            <div class="card-title">Advanced JSON Rules</div>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>Default Action</label>
+                    <select id="filter-default_action">
+                        <option value="keep">Keep unmatched findings</option>
+                        <option value="drop">Drop unmatched findings</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Rule Format <span class="hint">(JSON array, saved as YAML)</span></label>
+                    <div class="toggle-desc" style="padding-top: 30px;">
+                        Match against raw Wazuh or DefectDojo payload paths like <code>decoder.name</code>, <code>rule.groups</code>, or <code>data.srcip</code>.
+                    </div>
+                </div>
+                <div class="form-group full-width">
+                    <label>JSON Rules</label>
+                    <textarea id="filter-json_rules" placeholder='[
+  {
+    "name": "keep-fortigate-attacks",
+    "enabled": true,
+    "source": "wazuh",
+    "action": "keep",
+    "match": "all",
+    "conditions": [
+      {"path": "decoder.name", "op": "equals", "value": "fortigate-firewall-v6"},
+      {"path": "rule.groups", "op": "contains", "value": "attack"}
+    ]
+  }
+]'></textarea>
+                    <div class="toggle-desc">
+                        Supported operators: <code>equals</code>, <code>not_equals</code>, <code>contains</code>, <code>regex</code>, <code>in</code>, <code>not_in</code>, <code>gt</code>, <code>gte</code>, <code>lt</code>, <code>lte</code>, <code>exists</code>.
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- ════════════════════════════════════════════════════════ -->

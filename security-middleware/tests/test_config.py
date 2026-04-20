@@ -52,3 +52,36 @@ def test_defectdojo_config_normalizes_scope_and_checkpoint_fields():
     assert config.defectdojo.updated_since_minutes == 15
     assert config.defectdojo.fetch_limit == 250
     assert config.defectdojo.cursor_path == "data/custom_checkpoint.json"
+
+
+def test_filter_config_builds_advanced_json_rules():
+    config = _build_config({
+        "pipeline": {
+            "filter": {
+                "default_action": "drop",
+                "json_rules": [
+                    {
+                        "name": "keep-fortigate-attacks",
+                        "enabled": "true",
+                        "source": "WAZUH",
+                        "action": "keep",
+                        "match": "all",
+                        "conditions": [
+                            {"path": "decoder.name", "op": "equals", "value": "fortigate-firewall-v6"},
+                            {"path": "rule.groups", "op": "contains", "value": "attack"},
+                        ],
+                    }
+                ],
+            }
+        }
+    })
+
+    assert config.pipeline.filter.default_action == "drop"
+    assert len(config.pipeline.filter.json_rules) == 1
+    rule = config.pipeline.filter.json_rules[0]
+    assert rule.enabled is True
+    assert rule.source == "wazuh"
+    assert rule.action == "keep"
+    assert rule.match == "all"
+    assert rule.conditions[0].path == "decoder.name"
+    assert rule.conditions[1].op == "contains"

@@ -443,6 +443,10 @@ def _validate_config(data: dict) -> list[str]:
     if isinstance(ttl, int) and ttl < 1:
         issues.append("Dedup TTL is less than 1 hour")
 
+    filter_cfg = p.get("filter", {})
+    if filter_cfg.get("default_action") == "drop" and not filter_cfg.get("json_rules"):
+        issues.append("Advanced filter default action is 'drop' but no JSON rules are configured")
+
     return issues
 
 

@@ -177,6 +177,8 @@ function populateForm(c) {
     setChips('filter-exclude_rule_ids', c.pipeline?.filter?.exclude_rule_ids);
     setChips('filter-include_hosts', c.pipeline?.filter?.include_hosts);
     setChips('filter-exclude_title_patterns', c.pipeline?.filter?.exclude_title_patterns);
+    setVal('filter-default_action', c.pipeline?.filter?.default_action || 'keep');
+    setJsonTextarea('filter-json_rules', c.pipeline?.filter?.json_rules || []);
 
     // Dedup
     setChecked('dedup-enabled', c.pipeline?.dedup?.enabled);
@@ -203,6 +205,24 @@ function setVal(id, value) {
 function setChecked(id, value) {
     const el = document.getElementById(id);
     if (el) el.checked = !!value;
+}
+
+function setJsonTextarea(id, value) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.value = JSON.stringify(value || [], null, 2);
+}
+
+function getJsonTextareaValue(id, fallback) {
+    const el = document.getElementById(id);
+    const raw = (el?.value || '').trim();
+    if (!raw) return fallback;
+
+    try {
+        return JSON.parse(raw);
+    } catch (e) {
+        throw new Error(`Invalid JSON in ${id}: ${e.message}`);
+    }
 }
 
 // ── Collect Form → Config Object ───────────────────────────────
@@ -258,6 +278,8 @@ function collectForm() {
                 exclude_rule_ids:       chipData['filter-exclude_rule_ids'] || [],
                 include_hosts:          chipData['filter-include_hosts'] || [],
                 exclude_title_patterns: chipData['filter-exclude_title_patterns'] || [],
+                default_action:         getVal('filter-default_action') || 'keep',
+                json_rules:             getJsonTextareaValue('filter-json_rules', []),
             },
             dedup: {
                 enabled:   getChecked('dedup-enabled'),
@@ -352,8 +374,8 @@ function renderMultiSelectOptions(id, items, selectedValues, labelBuilder, prese
 
 // ── Save Config ────────────────────────────────────────────────
 async function saveConfig() {
-    const data = collectForm();
     try {
+        const data = collectForm();
         const res = await fetch('/api/config', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
@@ -378,8 +400,8 @@ async function testConnection(service) {
     if (statusEl) { statusEl.className = 'nav-status testing'; }
     if (badgeEl)  { badgeEl.innerHTML = '<span class="conn-status pending">Testing...</span>'; }
 
-    const data = collectForm();
     try {
+        const data = collectForm();
         const res = await fetch('/api/config/test/' + service, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
