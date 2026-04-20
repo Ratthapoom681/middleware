@@ -100,6 +100,40 @@ def test_defectdojo_scope_data_endpoint_returns_products_engagements_and_tests(m
         }
 
 
+def test_defectdojo_finding_count_endpoint_returns_preview_summary(monkeypatch):
+    def fake_count_summary(self):
+        return {
+            "matching_count": 120,
+            "pending_count": 15,
+            "checkpoint_applied": True,
+            "processing_cap": 10,
+            "estimated_processed_count": 10,
+        }
+
+    monkeypatch.setattr(DefectDojoClient, "get_finding_count_summary", fake_count_summary)
+
+    with server.app.test_client() as client:
+        response = client.post(
+            "/api/defectdojo/finding-count",
+            json={
+                "defectdojo": {
+                    "base_url": "https://dojo.example.com/api/v2",
+                    "api_key": "Token test",
+                }
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.get_json() == {
+            "status": "ok",
+            "matching_count": 120,
+            "pending_count": 15,
+            "checkpoint_applied": True,
+            "processing_cap": 10,
+            "estimated_processed_count": 10,
+        }
+
+
 def test_static_ui_assets_reference_new_defectdojo_fields():
     html = (server.PROJECT_ROOT / "web" / "static" / "index.html").read_text(encoding="utf-8")
     js = (server.PROJECT_ROOT / "web" / "static" / "js" / "app.js").read_text(encoding="utf-8")
@@ -113,6 +147,8 @@ def test_static_ui_assets_reference_new_defectdojo_fields():
         "defectdojo-engagement_ids",
         "defectdojo-test_ids",
         "syncDefectDojoScopeData",
+        "previewDefectDojoFindingCount",
         "renderDefectDojoWarnings",
+        "defectdojo-finding-count-summary",
     ]:
         assert token in html or token in js

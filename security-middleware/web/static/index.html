@@ -246,7 +246,13 @@
         </div>
 
         <div class="card">
-            <div class="card-title">Fetch Controls</div>
+            <div class="card-title">
+                Fetch Controls
+                <span style="margin-left:auto; display:flex; gap:10px; align-items:center;">
+                    <span id="defectdojo-finding-count-status" class="conn-status" style="display:none;"></span>
+                    <button class="btn btn-sm" onclick="previewDefectDojoFindingCount()">Check Findings</button>
+                </span>
+            </div>
             <div class="form-grid">
                 <div class="form-group" style="display:flex;align-items:end">
                     <div class="toggle-row" style="width:100%">
@@ -281,6 +287,7 @@
                     <input type="number" id="defectdojo-fetch_limit" min="0" placeholder="1000">
                 </div>
             </div>
+            <div id="defectdojo-finding-count-summary" class="toggle-desc" style="display:none; margin-top:15px;"></div>
         </div>
 
         <div class="card">

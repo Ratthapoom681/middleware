@@ -311,6 +311,92 @@ def test_fetch_scope_data_raises_helpful_error_on_non_json_response():
 
 
 @responses.activate
+def test_get_finding_count_summary_uses_current_filters_without_checkpoint():
+    client = _make_client(
+        active=True,
+        verified=False,
+        updated_since_minutes=30,
+        fetch_limit=25,
+        product_ids=[10],
+    )
+
+    responses.add(
+        responses.GET,
+        "http://defectdojo-test/api/v2/findings/",
+        json={"count": 37, "next": None, "results": []},
+        status=200,
+    )
+
+    summary = client.get_finding_count_summary()
+
+    assert summary == {
+        "matching_count": 37,
+        "pending_count": 37,
+        "checkpoint_applied": False,
+        "processing_cap": 25,
+        "estimated_processed_count": 25,
+    }
+
+    request_url = responses.calls[0].request.url
+    assert "verified=false" in request_url
+    assert "test__engagement__product=10" in request_url
+    assert "last_status_update=" in request_url
+
+
+@responses.activate
+def test_get_finding_count_summary_reports_pending_findings_after_checkpoint(workspace_tmp_dir):
+    cursor_path = workspace_tmp_dir / f"defectdojo_cursor_{uuid4().hex}.json"
+    cursor_path.write_text(
+        json.dumps(
+            {
+                "signature": json.dumps(
+                    {
+                        "active": True,
+                        "base_url": "http://defectdojo-test/api/v2",
+                        "engagement_ids": [],
+                        "product_ids": [],
+                        "severity_filter": ["Critical", "High", "Medium"],
+                        "test_ids": [],
+                        "verified": True,
+                    },
+                    sort_keys=True,
+                ),
+                "last_id": 12,
+                "last_status_update": "2026-04-09T10:00:00Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+    client = _make_client(fetch_limit=10, cursor_path=str(cursor_path))
+
+    responses.add(
+        responses.GET,
+        "http://defectdojo-test/api/v2/findings/",
+        json={"count": 120, "next": None, "results": []},
+        status=200,
+    )
+    responses.add(
+        responses.GET,
+        "http://defectdojo-test/api/v2/findings/",
+        json={"count": 15, "next": None, "results": []},
+        status=200,
+    )
+
+    summary = client.get_finding_count_summary()
+
+    assert summary == {
+        "matching_count": 120,
+        "pending_count": 15,
+        "checkpoint_applied": True,
+        "processing_cap": 10,
+        "estimated_processed_count": 10,
+    }
+
+    assert "last_status_update=" not in responses.calls[0].request.url
+    assert "last_status_update=2026-04-09T10%3A00%3A00Z" in responses.calls[1].request.url
+
+
+@responses.activate
 def test_test_connection_rejects_html_login_page():
     client = _make_client()
 

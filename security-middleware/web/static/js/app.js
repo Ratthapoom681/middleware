@@ -61,11 +61,13 @@ function addChip(container, field, value) {
     if (chipData[field].includes(value)) return;
     chipData[field].push(value);
     renderChips(container, field);
+    if (field === 'defectdojo-severity_filter') resetDefectDojoFindingCountPreview();
 }
 
 function removeChipByIndex(container, field, index) {
     chipData[field].splice(index, 1);
     renderChips(container, field);
+    if (field === 'defectdojo-severity_filter') resetDefectDojoFindingCountPreview();
 }
 
 function renderChips(container, field) {
@@ -147,6 +149,7 @@ function populateForm(c) {
     setMultiSelectValues('defectdojo-test_ids', c.defectdojo?.test_ids || [], value => `${value} (saved)`);
     updateDefectDojoScopeFilters();
     renderDefectDojoWarnings();
+    resetDefectDojoFindingCountPreview();
 
     // Redmine
     setVal('redmine-base_url', c.redmine?.base_url);
@@ -436,6 +439,87 @@ async function syncDefectDojoScopeData() {
             status.textContent = 'Sync Failed';
         }
         toast('Failed to sync DefectDojo scope data: ' + e.message, 'error');
+    }
+}
+
+function resetDefectDojoFindingCountPreview() {
+    const status = document.getElementById('defectdojo-finding-count-status');
+    const summary = document.getElementById('defectdojo-finding-count-summary');
+
+    if (status) {
+        status.style.display = 'none';
+        status.className = 'conn-status';
+        status.textContent = '';
+    }
+    if (summary) {
+        summary.style.display = 'none';
+        summary.textContent = '';
+        summary.style.color = '';
+    }
+}
+
+function formatDefectDojoFindingCountSummary(data) {
+    const matchingCount = Number.isFinite(data?.matching_count) ? data.matching_count : 0;
+    const pendingCount = Number.isFinite(data?.pending_count) ? data.pending_count : matchingCount;
+    const processingCap = Number.isFinite(data?.processing_cap) ? data.processing_cap : null;
+
+    if (data?.checkpoint_applied && processingCap !== null && pendingCount > processingCap) {
+        return `${matchingCount} findings match the current filters. ${pendingCount} are pending after the saved checkpoint, and the next sync will process up to ${processingCap}.`;
+    }
+    if (data?.checkpoint_applied) {
+        return `${matchingCount} findings match the current filters. ${pendingCount} are pending after the saved checkpoint.`;
+    }
+    if (processingCap !== null && matchingCount > processingCap) {
+        return `${matchingCount} findings match the current filters. The next sync will process up to ${processingCap} because Fetch Limit is set.`;
+    }
+    return `${matchingCount} findings match the current filters.`;
+}
+
+async function previewDefectDojoFindingCount() {
+    const status = document.getElementById('defectdojo-finding-count-status');
+    const summary = document.getElementById('defectdojo-finding-count-summary');
+
+    if (status) {
+        status.style.display = 'inline-flex';
+        status.className = 'conn-status pending';
+        status.textContent = 'Counting...';
+    }
+    if (summary) {
+        summary.style.display = 'none';
+        summary.textContent = '';
+        summary.style.color = '';
+    }
+
+    try {
+        const payload = collectForm();
+        const res = await fetch('/api/defectdojo/finding-count', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (data.status !== 'ok') throw new Error(data.message || 'Failed to count findings');
+
+        if (status) {
+            status.className = 'conn-status ok';
+            status.textContent = `${data.matching_count} Findings`;
+        }
+        if (summary) {
+            summary.textContent = formatDefectDojoFindingCountSummary(data);
+            summary.style.display = 'block';
+        }
+        toast(`DefectDojo count preview: ${data.matching_count} findings match current filters`, 'success');
+    } catch (e) {
+        if (status) {
+            status.className = 'conn-status fail';
+            status.textContent = 'Count Failed';
+        }
+        if (summary) {
+            summary.textContent = e.message;
+            summary.style.display = 'block';
+            summary.style.color = 'var(--red)';
+        }
+        toast('Failed to count DefectDojo findings: ' + e.message, 'error');
     }
 }
 
@@ -1026,11 +1110,29 @@ async function restoreBackup(filename) {
 // ── Init ───────────────────────────────────────────────────────
 ['defectdojo-product_ids', 'defectdojo-engagement_ids'].forEach(id => {
     const el = document.getElementById(id);
-    if (el) el.addEventListener('change', updateDefectDojoScopeFilters);
+    if (el) el.addEventListener('change', () => {
+        updateDefectDojoScopeFilters();
+        resetDefectDojoFindingCountPreview();
+    });
 });
 ['defectdojo-test_ids', 'defectdojo-updated_since_minutes', 'defectdojo-fetch_limit'].forEach(id => {
     const el = document.getElementById(id);
-    if (el) el.addEventListener('change', renderDefectDojoWarnings);
-    if (el) el.addEventListener('input', renderDefectDojoWarnings);
+    if (el) el.addEventListener('change', () => {
+        renderDefectDojoWarnings();
+        resetDefectDojoFindingCountPreview();
+    });
+    if (el) el.addEventListener('input', () => {
+        renderDefectDojoWarnings();
+        resetDefectDojoFindingCountPreview();
+    });
+});
+['defectdojo-base_url', 'defectdojo-api_key'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('input', resetDefectDojoFindingCountPreview);
+    if (el) el.addEventListener('change', resetDefectDojoFindingCountPreview);
+});
+['defectdojo-active', 'defectdojo-verified', 'defectdojo-enabled', 'defectdojo-verify_ssl'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('change', resetDefectDojoFindingCountPreview);
 });
 loadConfig();

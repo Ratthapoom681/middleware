@@ -299,6 +299,26 @@ def fetch_defectdojo_scope_data():
         logger.exception("DefectDojo scope synchronization failed")
         return jsonify({"status": "error", "message": str(e)}), 500
 
+
+@app.route("/api/defectdojo/finding-count", methods=["POST"])
+def preview_defectdojo_finding_count():
+    """Return a lightweight count preview for the current DefectDojo filters."""
+    try:
+        data = request.get_json() or {}
+        config = _build_config(data)
+
+        from src.sources.defectdojo_client import DefectDojoAPIError, DefectDojoClient
+
+        client = DefectDojoClient(config.defectdojo)
+        summary = client.get_finding_count_summary()
+        return jsonify({"status": "ok", **summary})
+    except DefectDojoAPIError as e:
+        logger.warning("DefectDojo finding count preview failed: %s", e)
+        return jsonify({"status": "error", "message": str(e)}), 400
+    except Exception as e:
+        logger.exception("DefectDojo finding count preview failed")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 @app.route("/api/webhook/wazuh", methods=["POST"])
 def wazuh_webhook():
     """

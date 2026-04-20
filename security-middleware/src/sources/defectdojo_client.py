@@ -123,37 +123,15 @@ class DefectDojoClient:
         """
         findings: list[Finding] = []
         url = f"{self.base_url}/findings/"
-        checkpoint_state = self._load_cursor()
         self._pending_checkpoint = None
 
         processing_cap = self.config.fetch_limit if self.config.fetch_limit > 0 else None
         page_limit = min(limit, processing_cap) if processing_cap else limit
         page_limit = max(1, page_limit)
-
-        params: dict[str, Any] = {
-            "active": "true" if self.config.active else "false",
-            "verified": "true" if self.config.verified else "false",
-            "duplicate": "false",
-            "limit": page_limit,
-            "offset": 0,
-            "ordering": "last_status_update,id",
-        }
-
-        if self.config.product_ids:
-            params["test__engagement__product"] = ",".join(map(str, self.config.product_ids))
-        if self.config.engagement_ids:
-            params["test__engagement"] = ",".join(map(str, self.config.engagement_ids))
-        if self.config.test_ids:
-            params["test"] = ",".join(map(str, self.config.test_ids))
-
-        if checkpoint_state:
-            params["last_status_update"] = checkpoint_state["last_status_update"]
-        elif self.config.updated_since_minutes > 0:
-            past_time = datetime.utcnow() - timedelta(minutes=self.config.updated_since_minutes)
-            params["last_status_update"] = past_time.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-        if self.config.severity_filter:
-            params["severity"] = ",".join(self.config.severity_filter)
+        params, checkpoint_state = self._build_findings_query_params(
+            limit=page_limit,
+            ordering="last_status_update,id",
+        )
 
         next_checkpoint_state = checkpoint_state
         try:
@@ -242,6 +220,38 @@ class DefectDojoClient:
             "tests": normalized_tests,
         }
 
+    def get_finding_count_summary(self) -> dict[str, Any]:
+        """
+        Return a read-only preview of how many findings match the current filters.
+
+        `matching_count` ignores the persisted checkpoint so the UI can show the
+        overall size of the current scope. `pending_count` includes the
+        checkpoint boundary so operators can see how many findings the next sync
+        could actually process.
+        """
+        matching_count = self._fetch_findings_count(include_checkpoint=False)
+        checkpoint_state = self._load_cursor()
+        checkpoint_applied = checkpoint_state is not None
+        pending_count = (
+            self._fetch_findings_count(include_checkpoint=True)
+            if checkpoint_applied
+            else matching_count
+        )
+        processing_cap = self.config.fetch_limit if self.config.fetch_limit > 0 else None
+        estimated_processed_count = (
+            min(pending_count, processing_cap)
+            if processing_cap is not None
+            else pending_count
+        )
+
+        return {
+            "matching_count": matching_count,
+            "pending_count": pending_count,
+            "checkpoint_applied": checkpoint_applied,
+            "processing_cap": processing_cap,
+            "estimated_processed_count": estimated_processed_count,
+        }
+
     def checkpoint_enabled(self) -> bool:
         """Return True when incremental checkpoint persistence is configured."""
         return bool(_clean_text(self.config.cursor_path))
@@ -262,6 +272,58 @@ class DefectDojoClient:
     def discard_pending_checkpoint(self) -> None:
         """Drop the fetched checkpoint when downstream processing fails."""
         self._pending_checkpoint = None
+
+    def _build_findings_query_params(
+        self,
+        *,
+        limit: int,
+        offset: int = 0,
+        include_checkpoint: bool = True,
+        ordering: str | None = None,
+    ) -> tuple[dict[str, Any], dict[str, Any] | None]:
+        """Build the canonical findings query params used by fetch and preview flows."""
+        checkpoint_state = self._load_cursor() if include_checkpoint else None
+        params: dict[str, Any] = {
+            "active": "true" if self.config.active else "false",
+            "verified": "true" if self.config.verified else "false",
+            "duplicate": "false",
+            "limit": max(1, limit),
+            "offset": max(0, offset),
+        }
+
+        if ordering:
+            params["ordering"] = ordering
+
+        if self.config.product_ids:
+            params["test__engagement__product"] = ",".join(map(str, self.config.product_ids))
+        if self.config.engagement_ids:
+            params["test__engagement"] = ",".join(map(str, self.config.engagement_ids))
+        if self.config.test_ids:
+            params["test"] = ",".join(map(str, self.config.test_ids))
+
+        if checkpoint_state:
+            params["last_status_update"] = checkpoint_state["last_status_update"]
+        elif self.config.updated_since_minutes > 0:
+            past_time = datetime.utcnow() - timedelta(minutes=self.config.updated_since_minutes)
+            params["last_status_update"] = past_time.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        if self.config.severity_filter:
+            params["severity"] = ",".join(self.config.severity_filter)
+
+        return params, checkpoint_state
+
+    def _fetch_findings_count(self, *, include_checkpoint: bool) -> int:
+        """Fetch the DefectDojo `count` for the current filter set."""
+        params, _ = self._build_findings_query_params(limit=1, include_checkpoint=include_checkpoint)
+        response = self.session.get(f"{self.base_url}/findings/", params=params, timeout=30)
+        data = self._parse_json_response(response, "/findings/ count preview")
+
+        try:
+            return max(0, int(data.get("count", 0) or 0))
+        except (TypeError, ValueError):
+            raise DefectDojoAPIError(
+                "DefectDojo returned an invalid count value for /findings/ count preview"
+            )
 
     def _fetch_collection(self, path: str) -> list[dict[str, Any]]:
         """Fetch a paginated DefectDojo collection endpoint."""
