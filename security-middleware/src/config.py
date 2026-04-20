@@ -7,6 +7,7 @@ Supports environment variable overrides for sensitive values.
 
 from __future__ import annotations
 
+import copy
 import logging
 import os
 from dataclasses import dataclass, field
@@ -23,6 +24,88 @@ DEFAULT_CONFIG_PATHS = [
     Path("config.yaml"),
     Path("/etc/security-middleware/config.yaml"),
 ]
+
+
+def _normalize_bool(value: Any, default: bool) -> bool:
+    """Coerce permissive config values into booleans."""
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return bool(value)
+
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def _normalize_int(value: Any, default: int) -> int:
+    """Coerce a scalar into an integer, preserving defaults on bad input."""
+    if value is None or value == "":
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _normalize_string_list(value: Any) -> list[str]:
+    """Normalize YAML/JSON scalar-or-list inputs into a string list."""
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str):
+        return [item.strip() for item in value.split(",") if item.strip()]
+    return [str(value).strip()] if str(value).strip() else []
+
+
+def _normalize_int_list(value: Any) -> list[int]:
+    """Normalize YAML/JSON scalar-or-list inputs into an integer list."""
+    values = _normalize_string_list(value)
+    normalized: list[int] = []
+    for item in values:
+        try:
+            normalized.append(int(item))
+        except (TypeError, ValueError):
+            logger.warning("Ignoring non-integer DefectDojo scope value: %r", item)
+    return normalized
+
+
+def _normalize_routing_source(value: Any) -> str:
+    """Collapse legacy routing aliases onto the canonical source keys."""
+    normalized = str(value or "wazuh").strip().lower()
+    if normalized == "dojo":
+        return "defectdojo"
+    return normalized or "wazuh"
+
+
+def _normalize_raw_config(raw: dict[str, Any]) -> dict[str, Any]:
+    """Apply legacy aliases and compatibility shims before dataclass hydration."""
+    normalized = copy.deepcopy(raw)
+
+    if "dojo" in normalized and "defectdojo" not in normalized:
+        normalized["defectdojo"] = normalized["dojo"]
+    normalized.pop("dojo", None)
+
+    defectdojo_raw = normalized.get("defectdojo", {})
+    if isinstance(defectdojo_raw, dict):
+        if "checkpoint_path" in defectdojo_raw and "cursor_path" not in defectdojo_raw:
+            defectdojo_raw["cursor_path"] = defectdojo_raw["checkpoint_path"]
+        defectdojo_raw.pop("checkpoint_path", None)
+
+    redmine_raw = normalized.get("redmine", {})
+    rules_raw = redmine_raw.get("routing_rules", [])
+    if isinstance(rules_raw, list):
+        for rule in rules_raw:
+            if isinstance(rule, dict):
+                rule["source"] = _normalize_routing_source(rule.get("source"))
+
+    return normalized
 
 
 @dataclass
@@ -55,6 +138,19 @@ class DefectDojoConfig:
     fetch_limit: int = 1000
     cursor_path: str = "data/defectdojo_cursor.json"
 
+    def __post_init__(self) -> None:
+        self.enabled = _normalize_bool(self.enabled, False)
+        self.verify_ssl = _normalize_bool(self.verify_ssl, True)
+        self.severity_filter = _normalize_string_list(self.severity_filter)
+        self.product_ids = _normalize_int_list(self.product_ids)
+        self.engagement_ids = _normalize_int_list(self.engagement_ids)
+        self.test_ids = _normalize_int_list(self.test_ids)
+        self.active = _normalize_bool(self.active, True)
+        self.verified = _normalize_bool(self.verified, True)
+        self.updated_since_minutes = max(0, _normalize_int(self.updated_since_minutes, 0))
+        self.fetch_limit = max(0, _normalize_int(self.fetch_limit, 1000))
+        self.cursor_path = str(self.cursor_path or "data/defectdojo_cursor.json")
+
 
 @dataclass
 class RedmineRoutingRule:
@@ -65,6 +161,15 @@ class RedmineRoutingRule:
     tracker_id: Optional[int] = None
     use_parent: bool = False
     parent_tracker_id: Optional[int] = None
+
+    def __post_init__(self) -> None:
+        self.enabled = _normalize_bool(self.enabled, True)
+        self.source = _normalize_routing_source(self.source)
+        self.match_type = str(self.match_type or "exact").strip().lower() or "exact"
+        self.match_value = str(self.match_value or "")
+        self.use_parent = _normalize_bool(self.use_parent, False)
+        self.tracker_id = None if self.tracker_id in ("", None) else _normalize_int(self.tracker_id, 0) or None
+        self.parent_tracker_id = None if self.parent_tracker_id in ("", None) else _normalize_int(self.parent_tracker_id, 0) or None
 
 
 @dataclass
@@ -170,19 +275,15 @@ def _apply_env_overrides(raw: dict[str, Any]) -> dict[str, Any]:
 
 def _build_config(raw: dict[str, Any]) -> AppConfig:
     """Build typed AppConfig from raw dictionary."""
-    
-    # Normalize legacy namespace explicitly mapped in older deployments
-    if "dojo" in raw and "defectdojo" not in raw:
-        raw["defectdojo"] = raw.pop("dojo")
-        
-    wazuh = WazuhConfig(**raw.get("wazuh", {}))
-    defectdojo = DefectDojoConfig(**raw.get("defectdojo", {}))
-    redmine_raw = raw.get("redmine", {})
+
+    normalized_raw = _normalize_raw_config(raw)
+
+    wazuh = WazuhConfig(**normalized_raw.get("wazuh", {}))
+    defectdojo = DefectDojoConfig(**normalized_raw.get("defectdojo", {}))
+    redmine_raw = normalized_raw.get("redmine", {})
     rules_raw = redmine_raw.get("routing_rules", [])
     routing_rules = []
     for r in rules_raw:
-        if r.get("source") == "dojo":
-            r["source"] = "defectdojo"
         routing_rules.append(RedmineRoutingRule(**r))
     
     redmine = RedmineConfig(
@@ -199,7 +300,7 @@ def _build_config(raw: dict[str, Any]) -> AppConfig:
         routing_rules=routing_rules
     )
 
-    pipeline_raw = raw.get("pipeline", {})
+    pipeline_raw = normalized_raw.get("pipeline", {})
     pipeline = PipelineConfig(
         poll_interval=pipeline_raw.get("poll_interval", 300),
         initial_lookback_minutes=pipeline_raw.get("initial_lookback_minutes", 1440),
@@ -208,7 +309,7 @@ def _build_config(raw: dict[str, Any]) -> AppConfig:
         enrichment=EnrichmentConfig(**pipeline_raw.get("enrichment", {})),
     )
 
-    logging_cfg = LoggingConfig(**raw.get("logging", {}))
+    logging_cfg = LoggingConfig(**normalized_raw.get("logging", {}))
 
     return AppConfig(
         wazuh=wazuh,

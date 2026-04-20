@@ -44,6 +44,21 @@ class RedmineClient:
             return successful[0].redmine_issue_id
         return None
 
+    def _source_link(self, finding: Finding) -> str:
+        """Return the browser-facing source URL for traceability when available."""
+        return str(
+            finding.enrichment.get("source_url")
+            or finding.enrichment.get("defectdojo_url")
+            or ""
+        ).strip()
+
+    def _source_link_section(self, finding: Finding) -> str:
+        """Build a Textile-safe source-link section for new Redmine issues."""
+        source_link = self._source_link(finding)
+        if not source_link:
+            return ""
+        return f'h3. Source Finding\n\n"View DefectDojo finding":{source_link}\n'
+
     def _create_issue(self, finding: Finding) -> Optional[int]:
         """Create a new Redmine issue."""
         url = f"{self.base_url}/issues.json"
@@ -67,8 +82,9 @@ class RedmineClient:
         if finding.dedup_hash not in description:
             description += f"\n\n---\n_Dedup Hash: {finding.dedup_hash}_\n"
 
-        if "defectdojo_url" in finding.enrichment:
-            description += f"\n---\n\nh3. Source Finding\n\n\"{finding.title}\":{finding.enrichment['defectdojo_url']}\n"
+        source_link_section = self._source_link_section(finding)
+        if source_link_section:
+            description += f"\n---\n\n{source_link_section}"
 
         # Append raw alert JSON for full data visibility
         if finding.raw_data:
@@ -130,6 +146,12 @@ class RedmineClient:
             "",
             f"This finding has been seen *{count}* more time(s) since the last update.",
         ]
+        source_link = self._source_link(finding)
+        if source_link:
+            note_parts.extend([
+                "",
+                f'"View DefectDojo finding":{source_link}',
+            ])
 
         update_data: dict[str, Any] = {
             "issue": {

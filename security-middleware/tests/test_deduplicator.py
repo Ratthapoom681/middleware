@@ -2,36 +2,72 @@
 Tests for the Deduplicator pipeline stage.
 """
 
-import os
-import tempfile
+from __future__ import annotations
 
 import pytest
+
 from src.config import DedupConfig
 from src.models.finding import Finding, FindingSource, Severity
 from src.pipeline.deduplicator import DeduplicatorStage
+from src.pipeline.identity import hydrate_identity
 
 
-def _make_finding(
+def _make_wazuh_finding(
     title: str = "Test Alert",
     host: str = "server-01",
     source_id: str = "001",
 ) -> Finding:
-    return Finding(
-        source=FindingSource.WAZUH,
-        source_id=source_id,
-        title=title,
-        description="Test",
-        severity=Severity.HIGH,
-        host=host,
+    return hydrate_identity(
+        Finding(
+            source=FindingSource.WAZUH,
+            source_id=source_id,
+            title=title,
+            description="Test",
+            severity=Severity.HIGH,
+            host=host,
+            rule_id="5710",
+        )
+    )
+
+
+def _make_defectdojo_finding(
+    *,
+    source_id: str,
+    title: str,
+    found_by: str,
+    host: str = "",
+    endpoints: list[str] | None = None,
+    endpoint_url: str = "",
+    plugin_id: str = "",
+    cwe: str = "",
+    param: str = "",
+    cve_ids: list[str] | None = None,
+) -> Finding:
+    return hydrate_identity(
+        Finding(
+            source=FindingSource.DEFECTDOJO,
+            source_id=source_id,
+            title=title,
+            description="Test",
+            severity=Severity.HIGH,
+            host=host,
+            endpoints=endpoints or [],
+            endpoint_url=endpoint_url,
+            plugin_id=plugin_id,
+            found_by=found_by,
+            cwe=cwe,
+            param=param,
+            cve_ids=cve_ids or [],
+        )
     )
 
 
 @pytest.fixture
-def dedup_stage(tmp_path):
+def dedup_stage(workspace_tmp_dir):
     """Create a DeduplicatorStage with a temp database."""
     config = DedupConfig(
         enabled=True,
-        db_path=str(tmp_path / "test_dedup.db"),
+        db_path=str(workspace_tmp_dir / "test_dedup.db"),
         ttl_hours=1,
     )
     stage = DeduplicatorStage(config)
@@ -40,62 +76,147 @@ def dedup_stage(tmp_path):
 
 
 class TestDeduplicator:
-
     def test_first_occurrence_passes(self, dedup_stage):
-        """First time a finding is seen, it should pass through."""
-        findings = [_make_finding()]
-        result = dedup_stage.process(findings)
-        assert len(result) == 1
+        finding = _make_wazuh_finding()
+        new_findings, repeat_findings = dedup_stage.process([finding])
 
-    def test_duplicate_dropped(self, dedup_stage):
-        """Same finding seen twice should be dropped the second time."""
-        finding = _make_finding()
-        dedup_stage.process([finding])
+        assert len(new_findings) == 1
+        assert repeat_findings == []
 
-        # Same finding again
-        duplicate = _make_finding()
-        result = dedup_stage.process([duplicate])
-        assert len(result) == 0
+    def test_duplicate_becomes_repeat_after_commit(self, dedup_stage):
+        finding = _make_wazuh_finding()
+        new_findings, _ = dedup_stage.process([finding])
+        dedup_stage.commit_new(new_findings)
 
-    def test_duplicate_dropped_within_same_batch(self, dedup_stage):
-        """Same finding repeated in one batch should only pass once."""
-        findings = [_make_finding(), _make_finding()]
-        result = dedup_stage.process(findings)
-        assert len(result) == 1
+        duplicate = _make_wazuh_finding(source_id="002")
+        new_findings, repeat_findings = dedup_stage.process([duplicate])
+
+        assert new_findings == []
+        assert len(repeat_findings) == 1
+        assert repeat_findings[0].dedup_reason == "repeat_within_ttl"
+
+    def test_duplicate_collapses_within_same_batch(self, dedup_stage):
+        findings = [_make_wazuh_finding(source_id="001"), _make_wazuh_finding(source_id="002")]
+        new_findings, repeat_findings = dedup_stage.process(findings)
+
+        assert len(new_findings) == 1
+        assert len(repeat_findings) == 1
+        assert repeat_findings[0].dedup_reason == "same_batch_duplicate"
 
     def test_different_findings_pass(self, dedup_stage):
-        """Different findings should both pass."""
-        f1 = _make_finding(title="Alert A", host="server-01")
-        f2 = _make_finding(title="Alert B", host="server-02")
+        f1 = _make_wazuh_finding(title="Alert A", host="server-01", source_id="001")
+        f2 = _make_wazuh_finding(title="Alert B", host="server-02", source_id="002")
 
-        result = dedup_stage.process([f1, f2])
-        assert len(result) == 2
+        new_findings, repeat_findings = dedup_stage.process([f1, f2])
+
+        assert len(new_findings) == 2
+        assert repeat_findings == []
 
     def test_same_title_different_host(self, dedup_stage):
-        """Same title on different hosts should be treated as unique."""
-        f1 = _make_finding(title="Alert A", host="server-01")
-        f2 = _make_finding(title="Alert A", host="server-02")
+        f1 = _make_wazuh_finding(title="Alert A", host="server-01", source_id="001")
+        f2 = _make_wazuh_finding(title="Alert A", host="server-02", source_id="002")
 
-        result = dedup_stage.process([f1, f2])
-        assert len(result) == 2
+        new_findings, repeat_findings = dedup_stage.process([f1, f2])
 
-    def test_disabled(self, tmp_path):
-        """When disabled, all findings should pass."""
-        config = DedupConfig(enabled=False, db_path=str(tmp_path / "unused.db"))
+        assert len(new_findings) == 2
+        assert repeat_findings == []
+
+    def test_tenable_scan_dedups_same_asset_and_separates_different_assets(self, dedup_stage):
+        finding_a = _make_defectdojo_finding(
+            source_id="dd-1",
+            title="SSL Certificate Expired",
+            found_by="Tenable Scan",
+            endpoints=["server-01"],
+            plugin_id="51192",
+            cve_ids=["CVE-2024-1111"],
+        )
+        finding_b = _make_defectdojo_finding(
+            source_id="dd-2",
+            title="SSL Certificate Expired",
+            found_by="Tenable Scan",
+            endpoints=["server-01"],
+            plugin_id="51192",
+            cve_ids=["CVE-2024-1111"],
+        )
+        finding_c = _make_defectdojo_finding(
+            source_id="dd-3",
+            title="SSL Certificate Expired",
+            found_by="Tenable Scan",
+            endpoints=["server-02"],
+            plugin_id="51192",
+            cve_ids=["CVE-2024-1111"],
+        )
+
+        same_asset_new, same_asset_repeat = dedup_stage.process([finding_a, finding_b])
+        different_asset_new, different_asset_repeat = dedup_stage.process([finding_c])
+
+        assert finding_a.dedup_hash == finding_b.dedup_hash
+        assert finding_a.dedup_hash != finding_c.dedup_hash
+        assert len(same_asset_new) == 1
+        assert len(same_asset_repeat) == 1
+        assert len(different_asset_new) == 1
+        assert different_asset_repeat == []
+
+    def test_zap_scan_dedups_same_endpoint_and_separates_different_endpoints(self, dedup_stage):
+        finding_a = _make_defectdojo_finding(
+            source_id="dd-10",
+            title="Reflected XSS",
+            found_by="ZAP Scan",
+            host="app.example.com",
+            endpoint_url="https://app.example.com/search",
+            cwe="79",
+            param="q",
+        )
+        finding_b = _make_defectdojo_finding(
+            source_id="dd-11",
+            title="Reflected XSS",
+            found_by="ZAP Scan",
+            host="app.example.com",
+            endpoint_url="https://app.example.com/search",
+            cwe="79",
+            param="q",
+        )
+        finding_c = _make_defectdojo_finding(
+            source_id="dd-12",
+            title="Reflected XSS",
+            found_by="ZAP Scan",
+            host="app.example.com",
+            endpoint_url="https://app.example.com/admin",
+            cwe="79",
+            param="q",
+        )
+
+        same_endpoint_new, same_endpoint_repeat = dedup_stage.process([finding_a, finding_b])
+        different_endpoint_new, different_endpoint_repeat = dedup_stage.process([finding_c])
+
+        assert finding_a.dedup_hash == finding_b.dedup_hash
+        assert finding_a.dedup_hash != finding_c.dedup_hash
+        assert len(same_endpoint_new) == 1
+        assert len(same_endpoint_repeat) == 1
+        assert len(different_endpoint_new) == 1
+        assert different_endpoint_repeat == []
+
+    def test_disabled(self, workspace_tmp_dir):
+        config = DedupConfig(enabled=False, db_path=str(workspace_tmp_dir / "unused.db"))
         stage = DeduplicatorStage(config)
 
-        finding = _make_finding()
-        stage.process([finding])
-        result = stage.process([finding])
-        assert len(result) == 1
+        finding = _make_wazuh_finding()
+        first_pass, repeat_findings = stage.process([finding])
+        second_pass, second_repeats = stage.process([finding])
+
+        assert len(first_pass) == 1
+        assert repeat_findings == []
+        assert len(second_pass) == 1
+        assert second_repeats == []
         stage.close()
 
     def test_stats(self, dedup_stage):
-        """Stats should reflect tracked hashes."""
         assert dedup_stage.get_stats()["total_tracked"] == 0
 
-        dedup_stage.process([_make_finding()])
+        new_findings, _ = dedup_stage.process([_make_wazuh_finding(source_id="001")])
+        dedup_stage.commit_new(new_findings)
         assert dedup_stage.get_stats()["total_tracked"] == 1
 
-        dedup_stage.process([_make_finding(title="Another", host="other")])
+        new_findings, _ = dedup_stage.process([_make_wazuh_finding(title="Another", host="other", source_id="002")])
+        dedup_stage.commit_new(new_findings)
         assert dedup_stage.get_stats()["total_tracked"] == 2

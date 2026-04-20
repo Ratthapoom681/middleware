@@ -29,6 +29,15 @@ defectdojo:
     - Critical
     - High
     - Medium
+  # Optional scope filters for large DefectDojo instances
+  product_ids: []
+  engagement_ids: []
+  test_ids: []
+  active: true
+  verified: true
+  updated_since_minutes: 0
+  fetch_limit: 1000
+  cursor_path: "data/defectdojo_cursor.json"
 
 # --- Redmine Issue Tracker ---
 redmine:

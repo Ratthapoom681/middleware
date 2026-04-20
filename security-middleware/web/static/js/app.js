@@ -1,6 +1,11 @@
 // ── State ──────────────────────────────────────────────────────
 let config = {};
 const chipData = {};   // field -> string[]
+const defectDojoScopeData = {
+    products: [],
+    engagements: [],
+    tests: [],
+};
 
 // ── Navigation ─────────────────────────────────────────────────
 const sectionTitles = {
@@ -89,6 +94,18 @@ function escapeHtml(str) {
     return d.innerHTML;
 }
 
+function encodeAttrValue(str) {
+    return encodeURIComponent(str || '');
+}
+
+function decodeAttrValue(str) {
+    try {
+        return decodeURIComponent(str || '');
+    } catch (e) {
+        return str || '';
+    }
+}
+
 // ── Load Config ────────────────────────────────────────────────
 async function loadConfig() {
     try {
@@ -121,6 +138,15 @@ function populateForm(c) {
     setVal('defectdojo-api_key', c.defectdojo?.api_key);
     setChecked('defectdojo-verify_ssl', c.defectdojo?.verify_ssl);
     setChips('defectdojo-severity_filter', c.defectdojo?.severity_filter);
+    setChecked('defectdojo-active', c.defectdojo?.active);
+    setChecked('defectdojo-verified', c.defectdojo?.verified);
+    setVal('defectdojo-updated_since_minutes', c.defectdojo?.updated_since_minutes);
+    setVal('defectdojo-fetch_limit', c.defectdojo?.fetch_limit);
+    setMultiSelectValues('defectdojo-product_ids', c.defectdojo?.product_ids || [], value => `${value} (saved)`);
+    setMultiSelectValues('defectdojo-engagement_ids', c.defectdojo?.engagement_ids || [], value => `${value} (saved)`);
+    setMultiSelectValues('defectdojo-test_ids', c.defectdojo?.test_ids || [], value => `${value} (saved)`);
+    updateDefectDojoScopeFilters();
+    renderDefectDojoWarnings();
 
     // Redmine
     setVal('redmine-base_url', c.redmine?.base_url);
@@ -191,11 +217,18 @@ function collectForm() {
             min_level:        getInt('wazuh-min_level', 7),
         },
         defectdojo: {
-            enabled:         getChecked('defectdojo-enabled'),
-            base_url:        getVal('defectdojo-base_url'),
-            api_key:         getVal('defectdojo-api_key'),
-            verify_ssl:      getChecked('defectdojo-verify_ssl'),
-            severity_filter: chipData['defectdojo-severity_filter'] || [],
+            enabled:               getChecked('defectdojo-enabled'),
+            base_url:              getVal('defectdojo-base_url'),
+            api_key:               getVal('defectdojo-api_key'),
+            verify_ssl:            getChecked('defectdojo-verify_ssl'),
+            severity_filter:       chipData['defectdojo-severity_filter'] || [],
+            product_ids:           getMultiSelectValues('defectdojo-product_ids'),
+            engagement_ids:        getMultiSelectValues('defectdojo-engagement_ids'),
+            test_ids:              getMultiSelectValues('defectdojo-test_ids'),
+            active:                getChecked('defectdojo-active'),
+            verified:              getChecked('defectdojo-verified'),
+            updated_since_minutes: getInt('defectdojo-updated_since_minutes', 0),
+            fetch_limit:           getInt('defectdojo-fetch_limit', 1000),
         },
         redmine: {
             base_url:              getVal('redmine-base_url'),
@@ -245,6 +278,74 @@ function getVal(id)  { return document.getElementById(id)?.value || ''; }
 function getChecked(id) { return document.getElementById(id)?.checked || false; }
 function getInt(id, def) { const v = parseInt(document.getElementById(id)?.value); return isNaN(v) ? def : v; }
 function getIntOrNull(id) { const v = parseInt(document.getElementById(id)?.value); return isNaN(v) ? null : v; }
+function getMultiSelectValues(id) {
+    const el = document.getElementById(id);
+    if (!el) return [];
+    return Array.from(el.selectedOptions)
+        .map(opt => parseInt(opt.value, 10))
+        .filter(value => !Number.isNaN(value));
+}
+
+function setMultiSelectValues(id, values, fallbackLabelBuilder) {
+    const el = document.getElementById(id);
+    if (!el) return;
+
+    const normalizedValues = (values || [])
+        .map(value => parseInt(value, 10))
+        .filter(value => !Number.isNaN(value));
+
+    normalizedValues.forEach(value => {
+        const existing = Array.from(el.options).find(opt => parseInt(opt.value, 10) === value);
+        if (!existing) {
+            const option = document.createElement('option');
+            option.value = String(value);
+            option.textContent = fallbackLabelBuilder ? fallbackLabelBuilder(value) : String(value);
+            el.appendChild(option);
+        }
+    });
+
+    Array.from(el.options).forEach(opt => {
+        opt.selected = normalizedValues.includes(parseInt(opt.value, 10));
+    });
+}
+
+function renderMultiSelectOptions(id, items, selectedValues, labelBuilder, preserveMissing = true) {
+    const el = document.getElementById(id);
+    if (!el) return;
+
+    const normalizedSelected = (selectedValues || [])
+        .map(value => parseInt(value, 10))
+        .filter(value => !Number.isNaN(value));
+
+    el.innerHTML = '';
+
+    items.forEach(item => {
+        const option = document.createElement('option');
+        option.value = String(item.id);
+        option.textContent = labelBuilder(item);
+        option.selected = normalizedSelected.includes(parseInt(item.id, 10));
+        if (item.product_id !== undefined && item.product_id !== null) {
+            option.dataset.productId = String(item.product_id);
+        }
+        if (item.engagement_id !== undefined && item.engagement_id !== null) {
+            option.dataset.engagementId = String(item.engagement_id);
+        }
+        el.appendChild(option);
+    });
+
+    if (preserveMissing) {
+        normalizedSelected.forEach(value => {
+            const existing = Array.from(el.options).find(opt => parseInt(opt.value, 10) === value);
+            if (!existing) {
+                const option = document.createElement('option');
+                option.value = String(value);
+                option.textContent = `${value} (saved)`;
+                option.selected = true;
+                el.appendChild(option);
+            }
+        });
+    }
+}
 
 // ── Save Config ────────────────────────────────────────────────
 async function saveConfig() {
@@ -297,6 +398,153 @@ async function testConnection(service) {
         if (badgeEl)  badgeEl.innerHTML = '<span class="conn-status fail">&#10007; Error</span>';
         toast('Connection test failed: ' + e.message, 'error');
     }
+}
+
+async function syncDefectDojoScopeData() {
+    const status = document.getElementById('defectdojo-scope-status');
+    if (status) {
+        status.style.display = 'inline-flex';
+        status.className = 'conn-status pending';
+        status.textContent = 'Syncing...';
+    }
+
+    try {
+        const payload = collectForm();
+        const res = await fetch('/api/defectdojo/scope-data', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (data.status !== 'ok') throw new Error(data.message || 'Failed to fetch scope data');
+
+        defectDojoScopeData.products = data.products || [];
+        defectDojoScopeData.engagements = data.engagements || [];
+        defectDojoScopeData.tests = data.tests || [];
+        renderDefectDojoScopeOptions();
+        renderDefectDojoWarnings();
+
+        if (status) {
+            status.className = 'conn-status ok';
+            status.textContent = `${defectDojoScopeData.products.length} Products`;
+            setTimeout(() => { status.style.display = 'none'; }, 5000);
+        }
+        toast('DefectDojo scope data synced', 'success');
+    } catch (e) {
+        if (status) {
+            status.className = 'conn-status fail';
+            status.textContent = 'Sync Failed';
+        }
+        toast('Failed to sync DefectDojo scope data: ' + e.message, 'error');
+    }
+}
+
+function renderDefectDojoScopeOptions() {
+    const selectedProducts = getMultiSelectValues('defectdojo-product_ids');
+    const selectedEngagements = getMultiSelectValues('defectdojo-engagement_ids');
+    const selectedTests = getMultiSelectValues('defectdojo-test_ids');
+
+    renderMultiSelectOptions(
+        'defectdojo-product_ids',
+        defectDojoScopeData.products,
+        selectedProducts,
+        item => `${item.id}: ${item.name}`
+    );
+
+    renderMultiSelectOptions(
+        'defectdojo-engagement_ids',
+        defectDojoScopeData.engagements,
+        selectedEngagements,
+        item => `${item.id}: ${item.name}`
+    );
+
+    renderMultiSelectOptions(
+        'defectdojo-test_ids',
+        defectDojoScopeData.tests,
+        selectedTests,
+        item => `${item.id}: ${item.name}`
+    );
+
+    updateDefectDojoScopeFilters();
+}
+
+function updateDefectDojoScopeFilters() {
+    if (
+        defectDojoScopeData.products.length === 0 &&
+        defectDojoScopeData.engagements.length === 0 &&
+        defectDojoScopeData.tests.length === 0
+    ) {
+        renderDefectDojoWarnings();
+        return;
+    }
+
+    const selectedProductIds = new Set(getMultiSelectValues('defectdojo-product_ids'));
+    const previousEngagementIds = getMultiSelectValues('defectdojo-engagement_ids');
+    const previousTestIds = getMultiSelectValues('defectdojo-test_ids');
+
+    const filteredEngagements = defectDojoScopeData.engagements.filter(item => {
+        if (selectedProductIds.size === 0) return true;
+        return item.product_id !== null && selectedProductIds.has(parseInt(item.product_id, 10));
+    });
+
+    renderMultiSelectOptions(
+        'defectdojo-engagement_ids',
+        filteredEngagements,
+        previousEngagementIds,
+        item => `${item.id}: ${item.name}`,
+        false
+    );
+
+    const effectiveEngagementIds = new Set(getMultiSelectValues('defectdojo-engagement_ids'));
+    const filteredTests = defectDojoScopeData.tests.filter(item => {
+        if (effectiveEngagementIds.size > 0) {
+            return item.engagement_id !== null && effectiveEngagementIds.has(parseInt(item.engagement_id, 10));
+        }
+        if (selectedProductIds.size > 0) {
+            return item.product_id !== null && selectedProductIds.has(parseInt(item.product_id, 10));
+        }
+        return true;
+    });
+
+    renderMultiSelectOptions(
+        'defectdojo-test_ids',
+        filteredTests,
+        previousTestIds,
+        item => `${item.id}: ${item.name}`,
+        false
+    );
+
+    renderDefectDojoWarnings();
+}
+
+function renderDefectDojoWarnings() {
+    const warningsEl = document.getElementById('defectdojo-scope-warnings');
+    if (!warningsEl) return;
+
+    const warnings = [];
+    const hasScopeFilters =
+        getMultiSelectValues('defectdojo-product_ids').length > 0 ||
+        getMultiSelectValues('defectdojo-engagement_ids').length > 0 ||
+        getMultiSelectValues('defectdojo-test_ids').length > 0;
+    const updatedSince = getInt('defectdojo-updated_since_minutes', 0);
+    const fetchLimit = getInt('defectdojo-fetch_limit', 1000);
+    const cursorPath = config?.defectdojo?.cursor_path || 'data/defectdojo_cursor.json';
+
+    if (!hasScopeFilters && updatedSince === 0) {
+        warnings.push('Dangerous DefectDojo scope: no Product/Engagement/Test filters are selected and Updated Since is 0.');
+    }
+    if (fetchLimit > 0 && !cursorPath) {
+        warnings.push('Fetch Limit is set without checkpoint-backed incremental sync; repeated runs can skip or replay findings.');
+    }
+
+    if (warnings.length === 0) {
+        warningsEl.innerHTML = '';
+        return;
+    }
+
+    warningsEl.innerHTML = warnings.map(message =>
+        `<div class="toast toast-warning" style="position:static; margin-bottom:5px; opacity:1;"><span>&#9888;</span> ${escapeHtml(message)}</div>`
+    ).join('');
 }
 
 // ── YAML Editor ───────────────────────────────────────────────
@@ -595,6 +843,9 @@ function evaluateRoutingSandbox() {
 }
 
 function useCurrentDeviceForRouting(source, routingKey) {
+    source = decodeAttrValue(source);
+    routingKey = decodeAttrValue(routingKey);
+
     // Switch to Redmine tab
     document.querySelector('.nav-item[data-section="redmine"]').click();
     
@@ -658,6 +909,10 @@ async function fetchLiveEvents() {
                     decisionBadge = '<span class="badge badge-purple">Processed</span>';
                 }
 
+                const sourceLinkHtml = f.source_link
+                    ? `<div style="font-size:11px;margin-top:6px;"><a href="${escapeHtml(f.source_link)}" target="_blank" rel="noopener noreferrer">Source finding</a></div>`
+                    : '';
+
                 findingsHtml = `<b>${escapeHtml(f.title || 'Unknown Rule')}</b><br>
                 <div style="margin-top:4px;display:flex;gap:6px;align-items:center;">
                     ${decisionBadge}
@@ -667,12 +922,13 @@ async function fetchLiveEvents() {
                     <div>Host: <span style="color:var(--text)">${escapeHtml(f.host || '')}</span></div>
                     <div style="display:flex; justify-content:space-between; align-items:center;">
                         <div>Device Name Used For Routing: <span style="font-family:'JetBrains Mono', monospace;color:var(--accent)">${escapeHtml(f.routing_key || '')}</span></div>
-                        <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;height:auto;" onclick="useCurrentDeviceForRouting('${escapeHtml(f.source||'')}', '${escapeHtml(f.routing_key||'')}')">Use Device for Routing</button>
+                        <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;height:auto;" onclick="useCurrentDeviceForRouting('${encodeAttrValue(f.source || '')}', '${encodeAttrValue(f.routing_key || '')}')">Use Device for Routing</button>
                     </div>
                 </div>
                 <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">
-                    Reason: <i>${escapeHtml(f.reason || 'Unknown')}</i> &bull; Tracker: ${f.selected_tracker || '?'} &bull; Rule: ${escapeHtml(f.matched_rule || 'none')} &bull; Occurrences: ${f.occurrences || 1}
-                </div>`;
+                    Dedup: <i>${escapeHtml(f.dedup_reason || f.reason || 'Unknown')}</i> &bull; Tracker: ${f.selected_tracker || '?'} &bull; Rule: ${escapeHtml(f.matched_rule || 'none')} &bull; Occurrences: ${f.occurrences || 1}
+                </div>
+                ${sourceLinkHtml}`;
 
                 if (evt.findings.length > 1) {
                     findingsHtml += `<div style="font-size:11px;color:var(--text-muted);margin-top:4px;">+ ${evt.findings.length - 1} more</div>`;
@@ -756,16 +1012,25 @@ async function restoreBackup(filename) {
         const res = await fetch(`/api/config/backups/restore/${encodeURIComponent(filename)}`, { method: 'POST' });
         const data = await res.json();
         if (data.status === 'ok') {
-            showToast('Backup restored successfully!', 'success');
+            toast('Backup restored successfully!', 'success');
             closeBackupViewer();
             loadConfig();
         } else {
-            showToast('Failed to restore backup: ' + data.message, 'error');
+            toast('Failed to restore backup: ' + data.message, 'error');
         }
     } catch(e) {
-        showToast('Network error restoring backup', 'error');
+        toast('Network error restoring backup', 'error');
     }
 }
 
 // ── Init ───────────────────────────────────────────────────────
+['defectdojo-product_ids', 'defectdojo-engagement_ids'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('change', updateDefectDojoScopeFilters);
+});
+['defectdojo-test_ids', 'defectdojo-updated_since_minutes', 'defectdojo-fetch_limit'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('change', renderDefectDojoWarnings);
+    if (el) el.addEventListener('input', renderDefectDojoWarnings);
+});
 loadConfig();

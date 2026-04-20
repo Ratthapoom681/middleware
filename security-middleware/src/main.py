@@ -147,6 +147,7 @@ class MiddlewarePipeline:
         except Exception as e:
             logger.error("Wazuh ingestion failed: %s", e)
 
+        dd_findings: list[Finding] = []
         if self.config.defectdojo.enabled:
             logger.info("--- Ingesting from DefectDojo ---")
             try:
@@ -154,6 +155,7 @@ class MiddlewarePipeline:
                 findings.extend(dd_findings)
                 logger.info("DefectDojo: %d findings ingested", len(dd_findings))
             except Exception as e:
+                self.defectdojo.discard_pending_checkpoint()
                 logger.error("DefectDojo ingestion failed: %s", e)
         else:
             logger.debug("DefectDojo: disabled, skipping")
@@ -162,7 +164,23 @@ class MiddlewarePipeline:
             logger.info("No findings to process this cycle")
             return {"ingested": 0, "filtered": 0, "deduplicated": 0, "output": 0}
 
-        outcome = self.process_batch(findings, cycle_start)
+        try:
+            outcome = self.process_batch(findings, cycle_start)
+        except Exception:
+            self.defectdojo.discard_pending_checkpoint()
+            raise
+
+        if dd_findings:
+            dd_failures = [finding for finding in dd_findings if getattr(finding, "action", None) == "failed"]
+            if dd_failures:
+                logger.warning(
+                    "DefectDojo: %d finding(s) failed downstream processing; checkpoint will not advance",
+                    len(dd_failures),
+                )
+                self.defectdojo.discard_pending_checkpoint()
+            else:
+                self.defectdojo.commit_pending_checkpoint()
+
         return outcome["stats"]
 
     def process_batch(self, findings: list[Finding], cycle_start: datetime = None) -> dict[str, Any]:
@@ -270,14 +288,19 @@ class MiddlewarePipeline:
             results.append({
                 "title": f.title,
                 "severity": f.severity.value,
-                "source": f.source_id,
+                "source": f.source.value,
+                "source_id": f.source_id,
                 "action": getattr(f, "action", None) or "Filtered",
                 "reason": getattr(f, "dedup_reason", None) or "Unknown",
+                "dedup_reason": getattr(f, "dedup_reason", None) or "",
                 "occurrences": getattr(f, "occurrence_count", 1),
                 "host": f.host,
                 "routing_key": f.routing_key,
                 "matched_rule": f.enrichment.get("matched_rule", "unknown"),
-                "selected_tracker": f.enrichment.get("selected_tracker", "unknown")
+                "selected_tracker": f.enrichment.get("selected_tracker", "unknown"),
+                "source_link": f.enrichment.get("source_url") or f.enrichment.get("defectdojo_url", ""),
+                "dedup_key": f.dedup_key,
+                "dedup_hash": f.dedup_hash,
             })
 
         return {

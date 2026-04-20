@@ -279,6 +279,23 @@ def fetch_redmine_trackers():
         logger.exception("Redmine tracker synchronization failed")
         return jsonify({"status": "error", "message": str(e)}), 500
 
+
+@app.route("/api/defectdojo/scope-data", methods=["POST"])
+def fetch_defectdojo_scope_data():
+    """Fetch products, engagements, and tests for the DefectDojo UI selectors."""
+    try:
+        data = request.get_json() or {}
+        config = _build_config(data)
+
+        from src.sources.defectdojo_client import DefectDojoClient
+
+        client = DefectDojoClient(config.defectdojo)
+        scope_data = client.fetch_scope_data()
+        return jsonify({"status": "ok", **scope_data})
+    except Exception as e:
+        logger.exception("DefectDojo scope synchronization failed")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 @app.route("/api/webhook/wazuh", methods=["POST"])
 def wazuh_webhook():
     """
@@ -384,6 +401,15 @@ def _validate_config(data: dict) -> list[str]:
         issues.append("DefectDojo base URL is empty")
     if not r.get("base_url"):
         issues.append("Redmine base URL is empty")
+    if (
+        not d.get("product_ids")
+        and not d.get("engagement_ids")
+        and not d.get("test_ids")
+        and int(d.get("updated_since_minutes", 0) or 0) == 0
+    ):
+        issues.append("DefectDojo scope is very broad: no Product/Engagement/Test filters and Updated Since is 0")
+    if int(d.get("fetch_limit", 0) or 0) > 0 and not d.get("cursor_path"):
+        issues.append("DefectDojo fetch_limit is set without checkpoint-backed incremental sync")
 
     poll = p.get("poll_interval", 300)
     if isinstance(poll, int) and poll < 30:

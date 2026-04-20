@@ -9,7 +9,45 @@ import hashlib
 from src.models.finding import Finding, FindingSource
 
 # Hash version bumped to v2 to enforce new srcip/endpoint separation schema.
-DEDUP_NAMESPACE = "v2"
+DEDUP_NAMESPACE = "v3"
+
+
+def _normalized_text(value: str) -> str:
+    """Normalize a string token for stable identity composition."""
+    return value.strip().lower()
+
+
+def _normalized_csv(values: list[str]) -> str:
+    """Normalize and sort list values for deterministic identity keys."""
+    normalized = sorted({_normalized_text(value) for value in values if value and value.strip()})
+    return ",".join(normalized)
+
+
+def _normalized_endpoints(finding: Finding) -> str:
+    """Build a stable endpoint list for DefectDojo identities."""
+    return _normalized_csv(finding.endpoints)
+
+
+def _defectdojo_profile(finding: Finding) -> str:
+    """Select the scanner-aware identity profile for a DefectDojo finding."""
+    found_by = _normalized_text(finding.found_by)
+    if "zap" in found_by:
+        return "zap"
+    if "tenable" in found_by or "nessus" in found_by:
+        return "tenable"
+    return "generic"
+
+
+def _generic_asset_key(finding: Finding, normalized_endpoints: str) -> str:
+    """Choose a stable asset/component discriminator for non-specialized scanners."""
+    if normalized_endpoints:
+        return normalized_endpoints
+    if finding.host.strip():
+        return _normalized_text(finding.host)
+    component_key = f"{_normalized_text(finding.component)}:{_normalized_text(finding.component_version)}"
+    if component_key != ":":
+        return component_key
+    return _normalized_text(finding.title)
 
 
 def _generate_wazuh_identity(finding: Finding) -> str:
@@ -17,60 +55,53 @@ def _generate_wazuh_identity(finding: Finding) -> str:
     key_parts = [
         finding.source.value,
         finding.rule_id or "0",
-        finding.title.strip().lower(),
-        finding.host.strip().lower(),
-        finding.srcip.strip().lower(),
-        ",".join(sorted(finding.cve_ids)),
+        _normalized_text(finding.title),
+        _normalized_text(finding.host),
+        _normalized_text(finding.srcip),
+        _normalized_csv(finding.cve_ids),
     ]
     return "|".join(key_parts)
 
 
 def _generate_defectdojo_identity(finding: Finding) -> str:
     """Build canonical deduplication signature structure for DefectDojo vulnerability scans."""
-    
-    normalized_endpoints = ",".join(sorted([e.strip().lower() for e in finding.endpoints if e.strip()]))
-    
-    # --- ZAP Scan Context ---
-    if "zap" in finding.found_by.lower():
+
+    normalized_endpoints = _normalized_endpoints(finding)
+    found_by = _normalized_text(finding.found_by)
+    title = _normalized_text(finding.title)
+    cves = _normalized_csv(finding.cve_ids)
+    profile = _defectdojo_profile(finding)
+
+    if profile == "zap":
         key_parts = [
             finding.source.value,
-            finding.found_by.strip().lower(),
-            finding.endpoint_url.strip().lower() or finding.host.strip().lower(),
-            finding.cwe.strip(),
-            finding.param.strip().lower(),
-            finding.title.strip().lower(),
+            found_by,
+            _normalized_text(finding.endpoint_url) or _normalized_text(finding.host),
+            _normalized_text(finding.cwe),
+            _normalized_text(finding.param),
+            title,
         ]
         return "|".join(key_parts)
-        
-    # --- Tenable Scan Context ---
-    if "tenable" in finding.found_by.lower() or "nessus" in finding.found_by.lower():
+
+    if profile == "tenable":
         key_parts = [
             finding.source.value,
-            finding.found_by.strip().lower(),
-            normalized_endpoints or finding.host.strip().lower(),
-            finding.plugin_id.strip().lower(),
-            ",".join(sorted(finding.cve_ids)),
-            finding.title.strip().lower(),
+            found_by,
+            normalized_endpoints or _normalized_text(finding.host),
+            _normalized_text(finding.plugin_id),
+            cves,
+            title,
         ]
         return "|".join(key_parts)
-    
-    # --- Generic Scanner Fallback Context ---
-    # If no endpoints physically parse, fall back to the component context to avoid blanket grouping.
-    # If no components exist, fall back to the raw title string.
-    asset_block = normalized_endpoints
-    if not asset_block:
-        asset_block = f"{finding.component.strip().lower()}:{finding.component_version.strip().lower()}"
-    if asset_block == ":":
-         asset_block = finding.title.strip().lower()
 
     key_parts = [
         finding.source.value,
-        finding.found_by.strip().lower(),
-        finding.title.strip().lower(),
-        finding.component.strip().lower(),
-        finding.component_version.strip().lower(),
-        asset_block,
-        ",".join(sorted(finding.cve_ids)),
+        found_by,
+        _generic_asset_key(finding, normalized_endpoints),
+        _normalized_text(finding.component),
+        _normalized_text(finding.component_version),
+        cves,
+        title,
     ]
     return "|".join(key_parts)
 
@@ -86,8 +117,7 @@ def hydrate_identity(finding: Finding) -> Finding:
         routing_key = finding.host
     elif finding.source == FindingSource.DEFECTDOJO:
         raw_key = _generate_defectdojo_identity(finding)
-        # Primary endpoint handles interface fallback context natively.
-        routing_key = finding.endpoints[0] if finding.endpoints else (finding.host or "unknown")
+        routing_key = finding.host or finding.endpoint_url or (finding.endpoints[0] if finding.endpoints else "unknown")
     else:
         # Failsafe identity
         raw_key = f"unknown|{finding.title}|{finding.host}"

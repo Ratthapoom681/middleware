@@ -19,17 +19,19 @@ from src.main import MiddlewarePipeline
 
 
 @pytest.fixture
-def config(tmp_path):
+def config(workspace_tmp_dir):
     """Create a test configuration."""
     return AppConfig(
         wazuh=WazuhConfig(
             base_url="http://wazuh-test:55000",
+            indexer_url="http://wazuh-indexer-test:9200",
             username="test",
             password="test",
             verify_ssl=False,
             min_level=3,
         ),
         defectdojo=DefectDojoConfig(
+            enabled=True,
             base_url="http://defectdojo-test/api/v2",
             api_key="Token test-key",
             verify_ssl=False,
@@ -45,7 +47,7 @@ def config(tmp_path):
             filter=FilterConfig(min_severity="low"),
             dedup=DedupConfig(
                 enabled=True,
-                db_path=str(tmp_path / "test_dedup.db"),
+                db_path=str(workspace_tmp_dir / "test_dedup.db"),
                 ttl_hours=1,
             ),
             enrichment=EnrichmentConfig(
@@ -68,47 +70,53 @@ def test_full_pipeline_cycle(config):
         status=200,
     )
 
-    # Mock Wazuh alerts
+    # Mock Wazuh Indexer alerts
     responses.add(
-        responses.GET,
-        "http://wazuh-test:55000/alerts",
+        responses.POST,
+        "http://wazuh-indexer-test:9200/wazuh-alerts-*/_search",
         json={
-            "data": {
-                "affected_items": [
+            "hits": {
+                "total": {"value": 2},
+                "hits": [
                     {
-                        "id": "alert-001",
-                        "timestamp": "2026-04-09T10:00:00+0000",
-                        "rule": {
-                            "id": "5710",
-                            "level": 10,
-                            "description": "SSH brute force attempt",
-                            "groups": ["sshd", "authentication"],
+                        "_id": "alert-001",
+                        "_source": {
+                            "@timestamp": "2026-04-09T10:00:00+00:00",
+                            "rule": {
+                                "id": "5710",
+                                "level": 10,
+                                "description": "SSH brute force attempt",
+                                "groups": ["sshd", "authentication"],
+                            },
+                            "agent": {
+                                "id": "001",
+                                "name": "web-server-01",
+                                "ip": "10.0.1.10",
+                            },
+                            "data": {},
                         },
-                        "agent": {
-                            "id": "001",
-                            "name": "web-server-01",
-                            "ip": "10.0.1.10",
-                        },
-                        "data": {},
+                        "sort": ["2026-04-09T10:00:00+00:00", "alert-001"],
                     },
                     {
-                        "id": "alert-002",
-                        "timestamp": "2026-04-09T10:01:00+0000",
-                        "rule": {
-                            "id": "100",
-                            "level": 2,
-                            "description": "Low level noise",
-                            "groups": ["syslog"],
+                        "_id": "alert-002",
+                        "_source": {
+                            "@timestamp": "2026-04-09T10:01:00+00:00",
+                            "rule": {
+                                "id": "100",
+                                "level": 2,
+                                "description": "Low level noise",
+                                "groups": ["syslog"],
+                            },
+                            "agent": {
+                                "id": "001",
+                                "name": "web-server-01",
+                                "ip": "10.0.1.10",
+                            },
+                            "data": {},
                         },
-                        "agent": {
-                            "id": "001",
-                            "name": "web-server-01",
-                            "ip": "10.0.1.10",
-                        },
-                        "data": {},
+                        "sort": ["2026-04-09T10:01:00+00:00", "alert-002"],
                     },
                 ],
-                "total_affected_items": 2,
             }
         },
         status=200,

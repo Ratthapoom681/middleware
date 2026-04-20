@@ -1,17 +1,20 @@
 """
 DefectDojo API client.
 
-Connects to DefectDojo's REST API v2 and fetches active findings.
-Each finding is converted into a unified Finding object.
+Connects to DefectDojo's REST API v2, normalizes findings into the shared
+Finding model, and maintains a persisted incremental checkpoint for safe
+high-volume polling.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import urlsplit, urlunsplit
 
 import requests
 from requests.exceptions import RequestException
@@ -22,7 +25,7 @@ from src.pipeline.identity import hydrate_identity
 
 logger = logging.getLogger(__name__)
 
-# DefectDojo severity → unified severity mapping
+# DefectDojo severity -> unified severity mapping
 DD_SEVERITY_MAP: dict[str, Severity] = {
     "critical": Severity.CRITICAL,
     "high": Severity.HIGH,
@@ -31,6 +34,63 @@ DD_SEVERITY_MAP: dict[str, Severity] = {
     "info": Severity.INFO,
     "informational": Severity.INFO,
 }
+
+_PLUGIN_TAG_RE = re.compile(
+    r"(?:plugin(?:[_\s-]?id)?|nessus(?:[_\s-]?plugin)?|tenable(?:[_\s-]?plugin)?)[:=\s#-]*([A-Za-z0-9._:-]+)",
+    re.IGNORECASE,
+)
+_UI_API_SUFFIX_RE = re.compile(r"/api(?:/v\d+)?/?$", re.IGNORECASE)
+
+
+def _clean_text(value: Any) -> str:
+    """Normalize arbitrary scalar values into stripped strings."""
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _clean_host(value: Any) -> str:
+    """Normalize hostnames/IPs for identity generation and routing."""
+    text = _clean_text(value).lower().strip("/")
+    if not text:
+        return ""
+    if text.startswith("[") and text.endswith("]"):
+        return text[1:-1]
+    return text
+
+
+def _clean_path(value: Any) -> str:
+    """Normalize endpoint paths without manufacturing a trailing slash."""
+    text = _clean_text(value)
+    if not text or text == "/":
+        return ""
+    return text if text.startswith("/") else f"/{text}"
+
+
+def _clean_protocol(value: Any) -> str:
+    """Normalize URL schemes into lowercase tokens."""
+    return _clean_text(value).lower().rstrip(":/")
+
+
+def _clean_port(value: Any) -> str:
+    """Normalize a numeric TCP port into a string."""
+    text = _clean_text(value)
+    if not text:
+        return ""
+    try:
+        return str(int(text))
+    except (TypeError, ValueError):
+        return ""
+
+
+def _normalize_identifier(value: Any) -> str:
+    """Normalize scanner/plugin identifiers without accepting noisy strings."""
+    if isinstance(value, (list, tuple, set, dict)):
+        return ""
+    text = _clean_text(value)
+    if not text:
+        return ""
+    return text
 
 
 class DefectDojoClient:
@@ -47,30 +107,31 @@ class DefectDojoClient:
             "Content-Type": "application/json",
             "Accept": "application/json",
         })
+        self._pending_checkpoint: dict[str, Any] | None = None
 
     def fetch_findings(self, limit: int = 100) -> list[Finding]:
         """
         Fetch active findings from DefectDojo.
 
-        Args:
-            limit: Maximum number of findings to fetch per page.
-
-        Returns:
-            List of Finding objects converted from DefectDojo findings.
+        The persisted checkpoint is used as the primary incremental boundary.
+        `fetch_limit` acts as a processing cap and the checkpoint only advances
+        after downstream processing explicitly commits it.
         """
         findings: list[Finding] = []
         url = f"{self.base_url}/findings/"
-        cursor_state = self._load_cursor()
-        page_limit = limit
-        if self.config.fetch_limit > 0:
-            page_limit = min(limit, self.config.fetch_limit)
+        checkpoint_state = self._load_cursor()
+        self._pending_checkpoint = None
+
+        processing_cap = self.config.fetch_limit if self.config.fetch_limit > 0 else None
+        page_limit = min(limit, processing_cap) if processing_cap else limit
+        page_limit = max(1, page_limit)
+
         params: dict[str, Any] = {
             "active": "true" if self.config.active else "false",
             "verified": "true" if self.config.verified else "false",
             "duplicate": "false",
             "limit": page_limit,
             "offset": 0,
-            # Stable ascending ordering lets us checkpoint on (timestamp, id).
             "ordering": "last_status_update,id",
         }
 
@@ -80,38 +141,37 @@ class DefectDojoClient:
             params["test__engagement"] = ",".join(map(str, self.config.engagement_ids))
         if self.config.test_ids:
             params["test"] = ",".join(map(str, self.config.test_ids))
-            
-        if cursor_state:
-            params["last_status_update"] = cursor_state["last_status_update"]
+
+        if checkpoint_state:
+            params["last_status_update"] = checkpoint_state["last_status_update"]
         elif self.config.updated_since_minutes > 0:
             past_time = datetime.utcnow() - timedelta(minutes=self.config.updated_since_minutes)
             params["last_status_update"] = past_time.strftime("%Y-%m-%dT%H:%M:%SZ")
 
-        # Filter by severity
         if self.config.severity_filter:
             params["severity"] = ",".join(self.config.severity_filter)
 
-        next_cursor_state = cursor_state
+        next_checkpoint_state = checkpoint_state
         try:
             while True:
                 response = self.session.get(url, params=params, timeout=60)
                 response.raise_for_status()
 
-                # Check if response is actually JSON
                 content_type = response.headers.get("Content-Type", "")
                 if "application/json" not in content_type:
                     logger.error(
                         "DefectDojo: expected JSON but got '%s'. Response body (first 500 chars): %s",
-                        content_type, response.text[:500]
+                        content_type,
+                        response.text[:500],
                     )
                     break
 
                 try:
                     data = response.json()
-                except ValueError as e:
+                except ValueError:
                     logger.error(
                         "DefectDojo: failed to parse JSON. Response (first 500 chars): %s",
-                        response.text[:500]
+                        response.text[:500],
                     )
                     break
 
@@ -122,41 +182,142 @@ class DefectDojoClient:
                     params["offset"],
                 )
 
-                reached_limit = False
+                reached_processing_cap = False
                 for dd_finding in results:
-                    if cursor_state and not self._is_after_cursor(dd_finding, cursor_state):
+                    if checkpoint_state and not self._is_after_cursor(dd_finding, checkpoint_state):
                         continue
 
                     finding = self._finding_to_model(dd_finding)
-                    if finding:
-                        findings.append(finding)
-                        cursor_candidate = self._make_cursor_state(dd_finding)
-                        if cursor_candidate:
-                            next_cursor_state = cursor_candidate
+                    if not finding:
+                        continue
 
-                    if self.config.fetch_limit > 0 and len(findings) >= self.config.fetch_limit:
-                        reached_limit = True
+                    findings.append(finding)
+                    checkpoint_candidate = self._make_cursor_state(dd_finding)
+                    if checkpoint_candidate:
+                        next_checkpoint_state = checkpoint_candidate
+
+                    if processing_cap and len(findings) >= processing_cap:
+                        reached_processing_cap = True
                         break
 
-                # Pagination
-                if reached_limit:
+                if reached_processing_cap:
                     break
                 if data.get("next"):
                     params["offset"] += page_limit
                 else:
                     break
 
-        except RequestException as e:
-            logger.error("DefectDojo: failed to fetch findings: %s", e)
+        except RequestException as exc:
+            logger.error("DefectDojo: failed to fetch findings: %s", exc)
 
-        if next_cursor_state and findings:
-            self._save_cursor(next_cursor_state)
+        if next_checkpoint_state and findings:
+            self._pending_checkpoint = next_checkpoint_state
 
         logger.info("DefectDojo: total findings fetched: %d", len(findings))
         return findings
 
+    def fetch_scope_data(self) -> dict[str, list[dict[str, Any]]]:
+        """Fetch products, engagements, and tests for UI scoping helpers."""
+        products = self._fetch_collection("/products/")
+        engagements = self._fetch_collection("/engagements/")
+        tests = self._fetch_collection("/tests/")
+
+        normalized_products = [
+            {
+                "id": int(item["id"]),
+                "name": item.get("name") or f"Product {item['id']}",
+            }
+            for item in products
+            if item.get("id") is not None
+        ]
+        normalized_engagements = [
+            {
+                "id": int(item["id"]),
+                "name": item.get("name") or item.get("title") or f"Engagement {item['id']}",
+                "product_id": self._extract_related_id(item, "product"),
+            }
+            for item in engagements
+            if item.get("id") is not None
+        ]
+        normalized_tests = [
+            {
+                "id": int(item["id"]),
+                "name": item.get("title") or item.get("name") or f"Test {item['id']}",
+                "engagement_id": self._extract_related_id(item, "engagement"),
+                "product_id": self._extract_related_id(item, "product"),
+            }
+            for item in tests
+            if item.get("id") is not None
+        ]
+
+        return {
+            "products": normalized_products,
+            "engagements": normalized_engagements,
+            "tests": normalized_tests,
+        }
+
+    def checkpoint_enabled(self) -> bool:
+        """Return True when incremental checkpoint persistence is configured."""
+        return bool(_clean_text(self.config.cursor_path))
+
+    def get_pending_checkpoint(self) -> dict[str, Any] | None:
+        """Expose the most recent fetched checkpoint boundary without persisting it."""
+        if not self._pending_checkpoint:
+            return None
+        return dict(self._pending_checkpoint)
+
+    def commit_pending_checkpoint(self) -> None:
+        """Persist the fetched checkpoint after downstream processing succeeds."""
+        if not self._pending_checkpoint:
+            return
+        self._save_cursor(self._pending_checkpoint)
+        self._pending_checkpoint = None
+
+    def discard_pending_checkpoint(self) -> None:
+        """Drop the fetched checkpoint when downstream processing fails."""
+        self._pending_checkpoint = None
+
+    def _fetch_collection(self, path: str) -> list[dict[str, Any]]:
+        """Fetch a paginated DefectDojo collection endpoint."""
+        items: list[dict[str, Any]] = []
+        url = f"{self.base_url}{path}"
+        params: dict[str, Any] = {"limit": 200, "offset": 0}
+
+        while True:
+            response = self.session.get(url, params=params, timeout=30)
+            response.raise_for_status()
+            data = response.json()
+            results = data.get("results", [])
+            items.extend(result for result in results if isinstance(result, dict))
+
+            if not data.get("next"):
+                break
+            params["offset"] += params["limit"]
+
+        return items
+
+    def _extract_related_id(self, item: dict[str, Any], field_name: str) -> int | None:
+        """Extract a related object ID from either an integer or expanded object."""
+        raw_value = item.get(field_name)
+        if isinstance(raw_value, dict):
+            raw_value = raw_value.get("id")
+        if raw_value is None and field_name == "product":
+            engagement = item.get("engagement")
+            if isinstance(engagement, dict):
+                product_value = engagement.get("product")
+                if isinstance(product_value, dict):
+                    raw_value = product_value.get("id")
+                else:
+                    raw_value = product_value
+        if raw_value in ("", None):
+            return None
+        try:
+            return int(raw_value)
+        except (TypeError, ValueError):
+            return None
+
     def _cursor_signature(self) -> str:
-        """Build a signature so stale cursors are discarded after config changes."""
+        """Build a signature so stale checkpoints are discarded after config changes."""
         signature = {
             "base_url": self.base_url,
             "active": self.config.active,
@@ -169,18 +330,18 @@ class DefectDojoClient:
         return json.dumps(signature, sort_keys=True)
 
     def _load_cursor(self) -> dict[str, Any] | None:
-        """Load the persisted high-watermark for incremental DefectDojo polling."""
+        """Load the persisted checkpoint for incremental DefectDojo polling."""
         if not self.cursor_path.exists():
             return None
 
         try:
             data = json.loads(self.cursor_path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
-            logger.warning("DefectDojo: failed to load cursor state: %s", exc)
+            logger.warning("DefectDojo: failed to load checkpoint state: %s", exc)
             return None
 
         if data.get("signature") != self._cursor_signature():
-            logger.info("DefectDojo: cursor filters changed, resetting incremental cursor")
+            logger.info("DefectDojo: checkpoint filters changed, resetting incremental checkpoint")
             return None
 
         last_status_update = data.get("last_status_update")
@@ -195,7 +356,7 @@ class DefectDojoClient:
         }
 
     def _save_cursor(self, state: dict[str, Any]) -> None:
-        """Persist the latest processed DefectDojo cursor to disk."""
+        """Persist the latest successfully processed DefectDojo checkpoint."""
         payload = {
             "version": 1,
             "signature": self._cursor_signature(),
@@ -206,7 +367,7 @@ class DefectDojoClient:
             self.cursor_path.parent.mkdir(parents=True, exist_ok=True)
             self.cursor_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         except OSError as exc:
-            logger.warning("DefectDojo: failed to persist cursor state: %s", exc)
+            logger.warning("DefectDojo: failed to persist checkpoint state: %s", exc)
 
     def _make_cursor_state(self, dd_finding: dict[str, Any]) -> dict[str, Any] | None:
         """Extract a stable high-watermark from a DefectDojo finding."""
@@ -221,7 +382,7 @@ class DefectDojoClient:
         }
 
     def _is_after_cursor(self, dd_finding: dict[str, Any], cursor_state: dict[str, Any]) -> bool:
-        """Return True when a finding sorts strictly after the persisted cursor."""
+        """Return True when a finding sorts strictly after the persisted checkpoint."""
         finding_cursor = self._make_cursor_state(dd_finding)
         if not finding_cursor:
             return True
@@ -238,38 +399,31 @@ class DefectDojoClient:
         """Convert a single DefectDojo finding to a Finding."""
         try:
             severity_str = dd_finding.get("severity", "Info")
-            severity_key = str(severity_str).strip().lower()
+            severity_key = _clean_text(severity_str).lower()
             severity = DD_SEVERITY_MAP.get(severity_key, Severity.INFO)
 
-            # Extract CVE IDs from vulnerability_ids
-            cve_ids = []
-            vulnerability_ids = dd_finding.get("vulnerability_ids", [])
-            for vuln_id in vulnerability_ids:
-                vid = vuln_id.get("vulnerability_id", "")
-                if vid.startswith("CVE-"):
-                    cve_ids.append(vid)
+            vulnerability_entries = self._collect_vulnerability_id_entries(dd_finding)
+            cve_ids = sorted({
+                entry["value"]
+                for entry in vulnerability_entries
+                if entry["value"].upper().startswith("CVE-")
+            })
 
-            # Extract host/endpoint info
-            endpoints = dd_finding.get("endpoints", [])
-            host = ""
-            if endpoints:
-                # Endpoints are IDs in DDefectDojo — use first one as reference
-                host = str(endpoints[0])
+            normalized_endpoints, normalized_endpoint_objects = self._normalize_endpoints(dd_finding.get("endpoints", []))
+            host = self._extract_host(dd_finding, normalized_endpoint_objects)
+            endpoint_url = self._extract_endpoint_url(normalized_endpoint_objects, normalized_endpoints, host)
 
-            # Parse dates
             date_str = dd_finding.get("date", "")
             try:
                 timestamp = datetime.strptime(date_str, "%Y-%m-%d")
             except (ValueError, TypeError):
                 timestamp = datetime.utcnow()
 
-            # Build rich description
             desc_parts = [
                 dd_finding.get("description", "No description"),
                 "",
                 f"**Severity:** {severity_str}",
-                f"**Component:** {dd_finding.get('component_name', 'N/A')} "
-                f"{dd_finding.get('component_version', '')}",
+                f"**Component:** {dd_finding.get('component_name', 'N/A')} {dd_finding.get('component_version', '')}".rstrip(),
             ]
 
             if dd_finding.get("cvssv3"):
@@ -279,24 +433,14 @@ class DefectDojoClient:
             if dd_finding.get("references"):
                 desc_parts.append(f"\n**References:**\n{dd_finding['references']}")
 
-            # Tags
             tags = list(dd_finding.get("tags", []))
             if dd_finding.get("test_type_name"):
                 tags.append(f"scan:{dd_finding['test_type_name']}")
 
-            cwe = str(dd_finding.get("cwe", "")) if dd_finding.get("cwe") else ""
-            param = dd_finding.get("param", "")
-            
-            # Map robust endpoint_url from DefectDojo endpoint schemas if they exist in full format
-            endpoint_url = ""
-            if dd_finding.get("endpoints") and isinstance(dd_finding["endpoints"][0], dict):
-                # Sometimes expanded payload holds URL
-                endpoint_url = dd_finding["endpoints"][0].get("url", "")
-            
-            # Locate scanner specific signatures
-            found_by = dd_finding.get("test_type_name", "")
-            plugin_id = self._extract_plugin_id(dd_finding, vulnerability_ids, found_by)
-                
+            found_by = _clean_text(dd_finding.get("test_type_name"))
+            plugin_id = self._extract_plugin_id(dd_finding, vulnerability_entries, found_by)
+            defectdojo_url = self._build_finding_ui_url(dd_finding.get("id"))
+
             finding = Finding(
                 source=FindingSource.DEFECTDOJO,
                 source_id=str(dd_finding.get("id", "unknown")),
@@ -305,71 +449,299 @@ class DefectDojoClient:
                 severity=severity,
                 raw_severity=severity_str,
                 host=host,
-                endpoints=[str(e) for e in endpoints],
-                endpoint_url=endpoint_url or host,
-                component=dd_finding.get('component_name', ''),
-                component_version=dd_finding.get('component_version', ''),
-                cwe=cwe,
-                param=param,
+                endpoints=normalized_endpoints,
+                endpoint_url=endpoint_url,
+                component=dd_finding.get("component_name", ""),
+                component_version=dd_finding.get("component_version", ""),
+                cwe=str(dd_finding.get("cwe", "")) if dd_finding.get("cwe") else "",
+                param=_clean_text(dd_finding.get("param")),
                 found_by=found_by,
                 plugin_id=plugin_id,
                 cvss=dd_finding.get("cvssv3_score"),
-                cve_ids=list(set(cve_ids)),
+                cve_ids=cve_ids,
                 tags=tags,
                 timestamp=timestamp,
                 raw_data=dd_finding,
                 enrichment={
-                    "defectdojo_url": f"{self.base_url.replace('/api/v2', '')}/finding/{dd_finding.get('id')}"
-                }
+                    "defectdojo_url": defectdojo_url,
+                    "source_url": defectdojo_url,
+                    "normalized_endpoints": normalized_endpoint_objects,
+                },
             )
             return hydrate_identity(finding)
 
-        except Exception as e:
-            logger.warning("DefectDojo: failed to parse finding: %s", e)
+        except Exception as exc:
+            logger.warning("DefectDojo: failed to parse finding: %s", exc)
             return None
+
+    def _build_finding_ui_url(self, finding_id: Any) -> str:
+        """Build a browser-facing URL for a DefectDojo finding."""
+        clean_id = _clean_text(finding_id)
+        if not clean_id:
+            return ""
+        ui_root = _UI_API_SUFFIX_RE.sub("", self.base_url)
+        return f"{ui_root}/finding/{clean_id}"
+
+    def _collect_vulnerability_id_entries(self, dd_finding: dict[str, Any]) -> list[dict[str, str]]:
+        """Flatten both legacy and modern vulnerability ID payload shapes."""
+        entries: list[dict[str, str]] = []
+        for key in ("vulnerability_ids", "vulnerability_id"):
+            entries.extend(self._coerce_vulnerability_entries(dd_finding.get(key)))
+        return entries
+
+    def _coerce_vulnerability_entries(self, raw_value: Any) -> list[dict[str, str]]:
+        """Normalize raw vulnerability ID payloads into a flat list of entries."""
+        if raw_value in (None, "", []):
+            return []
+        if isinstance(raw_value, list):
+            entries: list[dict[str, str]] = []
+            for item in raw_value:
+                entries.extend(self._coerce_vulnerability_entries(item))
+            return entries
+        if isinstance(raw_value, dict):
+            nested = raw_value.get("vulnerability_ids")
+            if nested not in (None, "", []):
+                return self._coerce_vulnerability_entries(nested)
+
+            value = (
+                raw_value.get("vulnerability_id")
+                or raw_value.get("value")
+                or raw_value.get("id")
+                or raw_value.get("name")
+            )
+            normalized = _normalize_identifier(value)
+            if not normalized:
+                return []
+            return [{
+                "value": normalized,
+                "source": _clean_text(raw_value.get("source")),
+                "type": _clean_text(raw_value.get("type") or raw_value.get("vulnerability_type")),
+                "name": _clean_text(raw_value.get("name")),
+            }]
+
+        normalized = _normalize_identifier(raw_value)
+        return [{"value": normalized, "source": "", "type": "", "name": ""}] if normalized else []
+
+    def _normalize_endpoints(self, endpoints: Any) -> tuple[list[str], list[dict[str, str]]]:
+        """Canonicalize expanded endpoint objects into stable host/URL records."""
+        normalized_objects: list[dict[str, str]] = []
+        normalized_values: list[str] = []
+        seen_values: set[str] = set()
+
+        for raw_endpoint in endpoints or []:
+            endpoint = self._normalize_endpoint(raw_endpoint)
+            canonical = endpoint["url"] or endpoint["canonical"]
+            if not canonical:
+                continue
+
+            if canonical not in seen_values:
+                seen_values.add(canonical)
+                normalized_values.append(canonical)
+                normalized_objects.append(endpoint)
+
+        return normalized_values, normalized_objects
+
+    def _normalize_endpoint(self, endpoint: Any) -> dict[str, str]:
+        """Normalize one endpoint payload into explicit canonical fields."""
+        protocol = ""
+        host = ""
+        port = ""
+        path = ""
+        url = ""
+
+        if isinstance(endpoint, dict):
+            protocol = _clean_protocol(endpoint.get("protocol") or endpoint.get("scheme"))
+            host = _clean_host(
+                endpoint.get("host")
+                or endpoint.get("hostname")
+                or endpoint.get("domain")
+                or endpoint.get("dns_name")
+                or endpoint.get("ip_address")
+                or endpoint.get("ip")
+            )
+            port = _clean_port(endpoint.get("port"))
+            path = _clean_path(endpoint.get("path"))
+            url = _clean_text(endpoint.get("url"))
+        else:
+            url = _clean_text(endpoint)
+
+        parsed = None
+        url_candidate = url
+        if url_candidate and not url_candidate.isdigit():
+            try:
+                parsed = urlsplit(url_candidate if "://" in url_candidate else f"//{url_candidate}")
+            except ValueError:
+                parsed = None
+
+        if parsed:
+            protocol = protocol or _clean_protocol(parsed.scheme)
+            host = host or _clean_host(parsed.hostname)
+            port = port or (_clean_port(parsed.port) if parsed.port is not None else "")
+            path = path or _clean_path(parsed.path)
+
+        display_port = port
+        if (protocol == "https" and port == "443") or (protocol == "http" and port == "80"):
+            display_port = ""
+
+        rebuilt_url = ""
+        if protocol and host:
+            hostport = f"{host}:{display_port}" if display_port else host
+            rebuilt_url = urlunsplit((protocol, hostport, path or "", "", ""))
+        elif host and path:
+            hostport = f"{host}:{display_port}" if display_port else host
+            rebuilt_url = f"{hostport}{path}"
+        elif host:
+            rebuilt_url = f"{host}:{display_port}" if display_port else host
+
+        canonical = rebuilt_url or (url_candidate if url_candidate and not url_candidate.isdigit() else "")
+
+        return {
+            "host": host,
+            "protocol": protocol,
+            "port": port,
+            "path": path,
+            "url": rebuilt_url,
+            "canonical": canonical,
+        }
+
+    def _extract_host(self, dd_finding: dict[str, Any], endpoint_objects: list[dict[str, str]]) -> str:
+        """Choose a stable asset host from normalized endpoints or top-level fields."""
+        for endpoint in endpoint_objects:
+            if endpoint["host"]:
+                return endpoint["host"]
+
+        for field in ("host", "hostname", "domain", "ip_address", "ip"):
+            host = _clean_host(dd_finding.get(field))
+            if host:
+                return host
+
+        for field in ("url", "endpoint_url", "target_start"):
+            candidate = self._normalize_endpoint(dd_finding.get(field))
+            if candidate["host"]:
+                return candidate["host"]
+
+        return ""
+
+    def _extract_endpoint_url(
+        self,
+        endpoint_objects: list[dict[str, str]],
+        normalized_endpoints: list[str],
+        host: str,
+    ) -> str:
+        """Choose the best URL-like endpoint for web scanner identities."""
+        for endpoint in endpoint_objects:
+            if endpoint["url"]:
+                return endpoint["url"]
+        if normalized_endpoints:
+            return normalized_endpoints[0]
+        return host
 
     def _extract_plugin_id(
         self,
         dd_finding: dict[str, Any],
-        vulnerability_ids: list[dict[str, Any]],
+        vulnerability_entries: list[dict[str, str]],
         found_by: str,
     ) -> str:
-        """Extract a stable scanner/plugin identifier for Tenable-style findings."""
+        """Extract a trustworthy scanner/plugin identifier for Tenable-style findings."""
         found_by_key = found_by.strip().lower()
+        is_tenable_scan = any(token in found_by_key for token in ("tenable", "nessus"))
+
         preferred_ids: list[str] = []
         fallback_ids: list[str] = []
 
-        for vuln_id in vulnerability_ids:
-            vid = str(vuln_id.get("vulnerability_id", "")).strip()
-            if not vid or vid.upper().startswith("CVE-"):
+        for entry in vulnerability_entries:
+            vuln_id = _normalize_identifier(entry.get("value"))
+            if not vuln_id or vuln_id.upper().startswith("CVE-"):
                 continue
 
-            id_type_parts = [
-                str(vuln_id.get("source", "")),
-                str(vuln_id.get("type", "")),
-                str(vuln_id.get("name", "")),
-            ]
-            id_type = " ".join(part.strip().lower() for part in id_type_parts if part)
-
-            if any(token in id_type for token in ("plugin", "nessus", "tenable")):
-                preferred_ids.append(vid)
+            id_context = " ".join(
+                part.strip().lower()
+                for part in (entry.get("source"), entry.get("type"), entry.get("name"))
+                if part
+            )
+            if any(token in id_context for token in ("plugin", "nessus", "tenable")):
+                preferred_ids.append(vuln_id)
             else:
-                fallback_ids.append(vid)
+                fallback_ids.append(vuln_id)
 
-        if "tenable" in found_by_key or "nessus" in found_by_key:
+        top_level_candidates = [
+            dd_finding.get("plugin_id"),
+            dd_finding.get("pluginid"),
+            dd_finding.get("nessus_plugin_id"),
+            dd_finding.get("tenable_plugin_id"),
+            dd_finding.get("vulnerability_id"),
+        ]
+        for candidate in top_level_candidates:
+            normalized = _normalize_identifier(candidate)
+            if normalized and not normalized.upper().startswith("CVE-"):
+                fallback_ids.append(normalized)
+
+        tag_candidate = self._extract_plugin_id_from_tags(dd_finding.get("tags", []))
+        if tag_candidate:
+            fallback_ids.append(tag_candidate)
+
+        raw_candidate = self._extract_plugin_id_from_object(dd_finding)
+        if raw_candidate:
+            fallback_ids.append(raw_candidate)
+
+        if is_tenable_scan:
             if preferred_ids:
                 return preferred_ids[0]
             if fallback_ids:
                 return fallback_ids[0]
 
-        plugin_val = str(dd_finding.get("vulnerability_id", "")).strip()
-        if plugin_val and not plugin_val.upper().startswith("CVE-"):
-            return plugin_val
-
         if preferred_ids:
             return preferred_ids[0]
         if fallback_ids:
             return fallback_ids[0]
+        return ""
+
+    def _extract_plugin_id_from_tags(self, tags: Any) -> str:
+        """Parse plugin identifiers from tag text when structured IDs are absent."""
+        for tag in tags or []:
+            text = _clean_text(tag)
+            if not text:
+                continue
+            match = _PLUGIN_TAG_RE.search(text)
+            if match:
+                return match.group(1)
+        return ""
+
+    def _extract_plugin_id_from_object(self, value: Any, depth: int = 0) -> str:
+        """Recursively inspect raw payload fragments for plugin-like identifiers."""
+        if depth > 4 or value is None:
+            return ""
+
+        if isinstance(value, dict):
+            for key, raw in value.items():
+                normalized_key = _clean_text(key).lower()
+                if normalized_key in {"plugin_id", "pluginid", "nessus_plugin_id", "tenable_plugin_id"}:
+                    candidate = _normalize_identifier(raw)
+                    if candidate:
+                        return candidate
+
+                if "plugin" in normalized_key or "nessus" in normalized_key or "tenable" in normalized_key:
+                    candidate = _normalize_identifier(raw)
+                    if candidate and not candidate.upper().startswith("CVE-"):
+                        return candidate
+
+                nested = self._extract_plugin_id_from_object(raw, depth + 1)
+                if nested:
+                    return nested
+            return ""
+
+        if isinstance(value, list):
+            for item in value:
+                nested = self._extract_plugin_id_from_object(item, depth + 1)
+                if nested:
+                    return nested
+            return ""
+
+        if isinstance(value, str):
+            match = _PLUGIN_TAG_RE.search(value)
+            if match:
+                return match.group(1)
+
         return ""
 
     def test_connection(self) -> bool:
@@ -383,6 +755,6 @@ class DefectDojoClient:
             response.raise_for_status()
             logger.info("DefectDojo: connection test successful")
             return True
-        except Exception as e:
-            logger.error("DefectDojo: connection test failed: %s", e)
+        except Exception as exc:
+            logger.error("DefectDojo: connection test failed: %s", exc)
             return False
