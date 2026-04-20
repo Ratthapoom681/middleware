@@ -29,7 +29,7 @@ A Python middleware service that ingests security findings from **Wazuh SIEM** a
 |-------|-------------|
 | **Filter** | Drop noise: minimum severity, excluded rule IDs, host/title patterns |
 | **Severity Mapper** | Normalize Wazuh levels (0–15) and DefectDojo strings → unified scale → Redmine priority |
-| **Deduplicator** | SHA-256 hash-based dedup with SQLite storage and configurable TTL |
+| **Deduplicator** | SHA-256 hash-based dedup with local SQLite or shared Postgres storage and configurable TTL |
 | **Enricher** | Add asset metadata, remediation links, CVSS context; format Redmine description |
 
 ---
@@ -258,6 +258,22 @@ pipeline:
     db_path: "data/dedup.db"      # SQLite database location
     ttl_hours: 168                 # Re-create ticket after 7 days
 ```
+
+### Shared State Storage
+
+```yaml
+storage:
+  backend: "postgres"              # local or postgres
+  postgres_dsn: "postgresql://middleware:secret@db/security"
+  postgres_schema: "middleware"
+  dedup_table: "middleware_seen_hashes"
+  checkpoint_table: "middleware_checkpoints"
+```
+
+When `storage.backend` is set to `postgres`:
+- dedup state moves from local SQLite into Postgres
+- DefectDojo incremental checkpoints move from local JSON files into Postgres
+- multiple middleware instances can share the same state safely
 
 ---
 

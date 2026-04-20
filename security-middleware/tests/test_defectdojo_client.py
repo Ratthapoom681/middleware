@@ -414,3 +414,48 @@ def test_test_connection_rejects_html_login_page():
     )
 
     assert client.test_connection() is False
+
+
+def test_checkpoint_store_can_replace_local_cursor_file():
+    class FakeCheckpointStore:
+        def __init__(self):
+            self.payloads = {}
+
+        def load_checkpoint(self, checkpoint_key, expected_signature):
+            entry = self.payloads.get(checkpoint_key)
+            if not entry or entry["signature"] != expected_signature:
+                return None
+            return dict(entry["payload"])
+
+        def save_checkpoint(self, checkpoint_key, signature, payload):
+            self.payloads[checkpoint_key] = {
+                "signature": signature,
+                "payload": dict(payload),
+            }
+
+    checkpoint_store = FakeCheckpointStore()
+    client = DefectDojoClient(
+        DefectDojoConfig(
+            base_url="http://defectdojo-test/api/v2",
+            api_key="Token test-key",
+            verify_ssl=False,
+            cursor_path="state/defectdojo.json",
+        ),
+        checkpoint_store=checkpoint_store,
+    )
+
+    assert client._load_cursor() is None
+
+    client._pending_checkpoint = {
+        "last_status_update": "2026-04-09T10:00:00Z",
+        "last_id": 99,
+        "signature": client._cursor_signature(),
+    }
+    client.commit_pending_checkpoint()
+
+    loaded = client._load_cursor()
+    assert loaded == {
+        "last_status_update": "2026-04-09T10:00:00Z",
+        "last_id": 99,
+    }
+    assert "defectdojo:state/defectdojo.json" in checkpoint_store.payloads

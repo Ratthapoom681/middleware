@@ -32,6 +32,7 @@ from src.pipeline.severity_mapper import SeverityMapperStage
 from src.pipeline.deduplicator import DeduplicatorStage
 from src.pipeline.enricher import EnricherStage
 from src.output.redmine_client import RedmineClient
+from src.state_store import create_state_store
 
 logger = logging.getLogger("middleware")
 
@@ -54,15 +55,16 @@ class MiddlewarePipeline:
         self.config = config
         self.config_path = config_path or config._loaded_path or "config/config.yaml"
         self._last_config_mtime = self._get_config_mtime()
+        self.state_store = create_state_store(config.storage)
 
         # Source clients
         self.wazuh = WazuhClient(config.wazuh)
-        self.defectdojo = DefectDojoClient(config.defectdojo)
+        self.defectdojo = DefectDojoClient(config.defectdojo, checkpoint_store=self.state_store)
 
         # Pipeline stages
         self.filter_stage = FilterStage(config.pipeline.filter)
         self.severity_mapper = SeverityMapperStage(config.redmine.priority_map)
-        self.dedup_stage = DeduplicatorStage(config.pipeline.dedup)
+        self.dedup_stage = DeduplicatorStage(config.pipeline.dedup, state_store=self.state_store)
         self.enricher = EnricherStage(config.pipeline.enrichment)
 
         # Output
@@ -83,19 +85,28 @@ class MiddlewarePipeline:
             self._last_config_mtime = current_mtime
             try:
                 from src.config import load_config
-                self.config = load_config(self.config_path)
-                
-                # Re-initialize all clients with new config
-                self.wazuh = WazuhClient(self.config.wazuh)
-                self.defectdojo = DefectDojoClient(self.config.defectdojo)
-                self.filter_stage = FilterStage(self.config.pipeline.filter)
-                self.severity_mapper = SeverityMapperStage(self.config.redmine.priority_map)
-                
+                new_config = load_config(self.config_path)
+                new_state_store = create_state_store(new_config.storage)
+
                 # Gracefully close old dedup DB connection
                 if hasattr(self, 'dedup_stage'):
                     self.dedup_stage.close()
-                self.dedup_stage = DeduplicatorStage(self.config.pipeline.dedup)
-                
+
+                self.config = new_config
+                self.state_store = new_state_store
+
+                # Re-initialize all clients with new config
+                self.wazuh = WazuhClient(self.config.wazuh)
+                self.defectdojo = DefectDojoClient(
+                    self.config.defectdojo,
+                    checkpoint_store=self.state_store,
+                )
+                self.filter_stage = FilterStage(self.config.pipeline.filter)
+                self.severity_mapper = SeverityMapperStage(self.config.redmine.priority_map)
+                self.dedup_stage = DeduplicatorStage(
+                    self.config.pipeline.dedup,
+                    state_store=self.state_store,
+                )
                 self.enricher = EnricherStage(self.config.pipeline.enrichment)
                 self.redmine = RedmineClient(self.config.redmine)
                 logger.info("Pipeline components reloaded successfully.")

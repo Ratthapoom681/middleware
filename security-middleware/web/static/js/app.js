@@ -227,8 +227,11 @@ function getJsonTextareaValue(id, fallback) {
 
 // ── Collect Form → Config Object ───────────────────────────────
 function collectForm() {
+    const base = JSON.parse(JSON.stringify(config || {}));
     return {
+        ...base,
         wazuh: {
+            ...(base.wazuh || {}),
             base_url:         getVal('wazuh-base_url'),
             username:         getVal('wazuh-username'),
             password:         getVal('wazuh-password'),
@@ -240,6 +243,7 @@ function collectForm() {
             min_level:        getInt('wazuh-min_level', 7),
         },
         defectdojo: {
+            ...(base.defectdojo || {}),
             enabled:               getChecked('defectdojo-enabled'),
             base_url:              getVal('defectdojo-base_url'),
             api_key:               getVal('defectdojo-api_key'),
@@ -254,6 +258,7 @@ function collectForm() {
             fetch_limit:           getInt('defectdojo-fetch_limit', 1000),
         },
         redmine: {
+            ...(base.redmine || {}),
             base_url:              getVal('redmine-base_url'),
             api_key:               getVal('redmine-api_key'),
             project_id:            getVal('redmine-project_id'),
@@ -271,9 +276,11 @@ function collectForm() {
             routing_rules: JSON.parse(JSON.stringify(localRoutingRules)) // Deep copy safety
         },
         pipeline: {
+            ...(base.pipeline || {}),
             poll_interval: getInt('pipeline-poll_interval', 300),
             initial_lookback_minutes: getInt('pipeline-initial_lookback_minutes', 1440),
             filter: {
+                ...((base.pipeline || {}).filter || {}),
                 min_severity:           getVal('filter-min_severity'),
                 exclude_rule_ids:       chipData['filter-exclude_rule_ids'] || [],
                 include_hosts:          chipData['filter-include_hosts'] || [],
@@ -282,17 +289,20 @@ function collectForm() {
                 json_rules:             getJsonTextareaValue('filter-json_rules', []),
             },
             dedup: {
+                ...((base.pipeline || {}).dedup || {}),
                 enabled:   getChecked('dedup-enabled'),
                 db_path:   getVal('dedup-db_path'),
                 ttl_hours: getInt('dedup-ttl_hours', 168),
             },
             enrichment: {
+                ...((base.pipeline || {}).enrichment || {}),
                 asset_inventory_enabled: getChecked('enrichment-asset_inventory_enabled'),
                 asset_inventory_path:    getVal('enrichment-asset_inventory_path'),
                 add_remediation_links:   getChecked('enrichment-add_remediation_links'),
             },
         },
         logging: {
+            ...(base.logging || {}),
             level:  getVal('logging-level'),
             format: getVal('logging-format'),
         },
@@ -383,6 +393,7 @@ async function saveConfig() {
         });
         const result = await res.json();
         if (result.status === 'ok') {
+            config = data;
             toast('Configuration saved successfully', 'success');
         } else {
             toast('Save failed: ' + result.message, 'error');

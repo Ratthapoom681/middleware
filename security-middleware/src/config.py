@@ -294,6 +294,25 @@ class DedupConfig:
 
 
 @dataclass
+class StorageConfig:
+    backend: str = "local"  # local or postgres
+    postgres_dsn: str = ""
+    postgres_schema: str = "public"
+    dedup_table: str = "middleware_seen_hashes"
+    checkpoint_table: str = "middleware_checkpoints"
+
+    def __post_init__(self) -> None:
+        self.backend = str(self.backend or "local").strip().lower() or "local"
+        if self.backend not in {"local", "postgres"}:
+            raise ValueError("storage.backend must be 'local' or 'postgres'")
+
+        self.postgres_dsn = str(self.postgres_dsn or "").strip()
+        self.postgres_schema = str(self.postgres_schema or "public").strip() or "public"
+        self.dedup_table = str(self.dedup_table or "middleware_seen_hashes").strip() or "middleware_seen_hashes"
+        self.checkpoint_table = str(self.checkpoint_table or "middleware_checkpoints").strip() or "middleware_checkpoints"
+
+
+@dataclass
 class EnrichmentConfig:
     asset_inventory_enabled: bool = False
     asset_inventory_path: str = "config/assets.yaml"
@@ -322,6 +341,7 @@ class AppConfig:
     defectdojo: DefectDojoConfig = field(default_factory=DefectDojoConfig)
     redmine: RedmineConfig = field(default_factory=RedmineConfig)
     pipeline: PipelineConfig = field(default_factory=PipelineConfig)
+    storage: StorageConfig = field(default_factory=StorageConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     _loaded_path: str = ""
 
@@ -336,6 +356,8 @@ def _apply_env_overrides(raw: dict[str, Any]) -> dict[str, Any]:
       WAZUH_PASSWORD       → wazuh.password
       DEFECTDOJO_BASE_URL  → defectdojo.base_url
       DEFECTDOJO_API_KEY   → defectdojo.api_key
+      STATE_BACKEND        → storage.backend
+      STATE_POSTGRES_DSN   → storage.postgres_dsn
       REDMINE_BASE_URL     → redmine.base_url
       REDMINE_API_KEY      → redmine.api_key
     """
@@ -345,6 +367,8 @@ def _apply_env_overrides(raw: dict[str, Any]) -> dict[str, Any]:
         "WAZUH_PASSWORD": ("wazuh", "password"),
         "DEFECTDOJO_BASE_URL": ("defectdojo", "base_url"),
         "DEFECTDOJO_API_KEY": ("defectdojo", "api_key"),
+        "STATE_BACKEND": ("storage", "backend"),
+        "STATE_POSTGRES_DSN": ("storage", "postgres_dsn"),
         "REDMINE_BASE_URL": ("redmine", "base_url"),
         "REDMINE_API_KEY": ("redmine", "api_key"),
     }
@@ -395,6 +419,7 @@ def _build_config(raw: dict[str, Any]) -> AppConfig:
         dedup=DedupConfig(**pipeline_raw.get("dedup", {})),
         enrichment=EnrichmentConfig(**pipeline_raw.get("enrichment", {})),
     )
+    storage = StorageConfig(**normalized_raw.get("storage", {}))
 
     logging_cfg = LoggingConfig(**normalized_raw.get("logging", {}))
 
@@ -403,6 +428,7 @@ def _build_config(raw: dict[str, Any]) -> AppConfig:
         defectdojo=defectdojo,
         redmine=redmine,
         pipeline=pipeline,
+        storage=storage,
         logging=logging_cfg,
     )
 

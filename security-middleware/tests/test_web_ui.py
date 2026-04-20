@@ -186,6 +186,43 @@ def test_config_api_round_trips_advanced_filter_rules(workspace_tmp_dir, monkeyp
         assert len(saved["pipeline"]["filter"]["json_rules"][0]["conditions"]) == 3
 
 
+def test_config_api_round_trips_storage_backend(workspace_tmp_dir, monkeypatch):
+    config_path = workspace_tmp_dir / "config.yaml"
+    backup_dir = workspace_tmp_dir / "backups"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "storage": {
+                    "backend": "postgres",
+                    "postgres_dsn": "postgresql://middleware:secret@db/security",
+                    "postgres_schema": "middleware",
+                    "dedup_table": "seen_hashes",
+                    "checkpoint_table": "checkpoints",
+                }
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(server, "CONFIG_PATH", config_path)
+    monkeypatch.setattr(server, "BACKUP_DIR", backup_dir)
+
+    with server.app.test_client() as client:
+        response = client.get("/api/config")
+        payload = response.get_json()["config"]
+
+        assert payload["storage"]["backend"] == "postgres"
+        assert payload["storage"]["postgres_dsn"] == "postgresql://middleware:secret@db/security"
+
+        save_response = client.post("/api/config", json=payload)
+        assert save_response.get_json()["status"] == "ok"
+
+        saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        assert saved["storage"]["backend"] == "postgres"
+        assert saved["storage"]["checkpoint_table"] == "checkpoints"
+
+
 def test_static_ui_assets_reference_new_defectdojo_fields():
     html = (server.PROJECT_ROOT / "web" / "static" / "index.html").read_text(encoding="utf-8")
     js = (server.PROJECT_ROOT / "web" / "static" / "js" / "app.js").read_text(encoding="utf-8")

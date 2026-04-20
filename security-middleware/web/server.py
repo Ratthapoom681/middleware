@@ -30,6 +30,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.main import MiddlewarePipeline
+from src.state_store import create_state_store
 from src.sources.wazuh_client import WazuhClient
 
 from src.config import (
@@ -233,8 +234,13 @@ def test_connection(service: str):
             ok = client.test_connection()
         elif service == "defectdojo":
             from src.sources.defectdojo_client import DefectDojoClient
-            client = DefectDojoClient(config.defectdojo)
-            ok = client.test_connection()
+            state_store = create_state_store(config.storage)
+            try:
+                client = DefectDojoClient(config.defectdojo, checkpoint_store=state_store)
+                ok = client.test_connection()
+            finally:
+                if state_store:
+                    state_store.close()
         elif service == "redmine":
             from src.output.redmine_client import RedmineClient
             client = RedmineClient(config.redmine)
@@ -289,8 +295,13 @@ def fetch_defectdojo_scope_data():
 
         from src.sources.defectdojo_client import DefectDojoAPIError, DefectDojoClient
 
-        client = DefectDojoClient(config.defectdojo)
-        scope_data = client.fetch_scope_data()
+        state_store = create_state_store(config.storage)
+        try:
+            client = DefectDojoClient(config.defectdojo, checkpoint_store=state_store)
+            scope_data = client.fetch_scope_data()
+        finally:
+            if state_store:
+                state_store.close()
         return jsonify({"status": "ok", **scope_data})
     except DefectDojoAPIError as e:
         logger.warning("DefectDojo scope synchronization failed: %s", e)
@@ -309,8 +320,13 @@ def preview_defectdojo_finding_count():
 
         from src.sources.defectdojo_client import DefectDojoAPIError, DefectDojoClient
 
-        client = DefectDojoClient(config.defectdojo)
-        summary = client.get_finding_count_summary()
+        state_store = create_state_store(config.storage)
+        try:
+            client = DefectDojoClient(config.defectdojo, checkpoint_store=state_store)
+            summary = client.get_finding_count_summary()
+        finally:
+            if state_store:
+                state_store.close()
         return jsonify({"status": "ok", **summary})
     except DefectDojoAPIError as e:
         logger.warning("DefectDojo finding count preview failed: %s", e)
@@ -400,6 +416,7 @@ def _config_to_dict(config: AppConfig) -> dict:
             "dedup": asdict(config.pipeline.dedup),
             "enrichment": asdict(config.pipeline.enrichment),
         },
+        "storage": asdict(config.storage),
         "logging": asdict(config.logging),
     }
 
@@ -447,6 +464,10 @@ def _validate_config(data: dict) -> list[str]:
     if filter_cfg.get("default_action") == "drop" and not filter_cfg.get("json_rules"):
         issues.append("Advanced filter default action is 'drop' but no JSON rules are configured")
 
+    storage = data.get("storage", {})
+    if storage.get("backend") == "postgres" and not storage.get("postgres_dsn"):
+        issues.append("Storage backend is set to postgres but postgres_dsn is empty")
+
     return issues
 
 
@@ -468,6 +489,7 @@ def _build_yaml(data: dict) -> str:
     _dump_section("DefectDojo Vulnerability Management", "defectdojo", data.get("defectdojo", {}))
     _dump_section("Redmine Issue Tracker", "redmine", data.get("redmine", {}))
     _dump_section("Pipeline Settings", "pipeline", data.get("pipeline", {}))
+    _dump_section("Shared State Storage", "storage", data.get("storage", {}))
     _dump_section("Logging", "logging", data.get("logging", {}))
 
     return "\n".join(lines) + "\n"

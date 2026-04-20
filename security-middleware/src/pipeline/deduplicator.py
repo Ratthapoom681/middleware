@@ -12,6 +12,7 @@ import logging
 import sqlite3
 import time
 from pathlib import Path
+from typing import Any
 
 from src.config import DedupConfig
 from src.models.finding import Finding
@@ -41,13 +42,14 @@ class DeduplicatorStage:
     dropped; others are passed through and recorded.
     """
 
-    def __init__(self, config: DedupConfig):
+    def __init__(self, config: DedupConfig, state_store: Any | None = None):
         self.config = config
         self.enabled = config.enabled
         self.ttl_seconds = config.ttl_hours * 3600
         self._conn: sqlite3.Connection | None = None
+        self._state_store = state_store
 
-        if self.enabled:
+        if self.enabled and not self._state_store:
             self._init_db()
 
     def _init_db(self) -> None:
@@ -106,56 +108,55 @@ class DeduplicatorStage:
         if not findings:
             return [], []
 
-        assert self._conn is not None
+        assert self._conn is not None or self._state_store is not None
         now = time.time()
         cutoff = now - self.ttl_seconds
         new_findings: list[Finding] = []
         # Collapse repeats by hash: hash -> (representative Finding, count)
         repeat_map: dict[str, tuple[Finding, int]] = {}
 
-        with self._conn:
-            all_known_hashes = self._get_all_hashes([finding.dedup_hash for finding in findings])
-            
-            seen_dict = self._get_recent_hashes(
-                [finding.dedup_hash for finding in findings],
-                cutoff,
-            )
-            seen_hashes = set(seen_dict.keys())
+        all_known_hashes = self._get_all_hashes([finding.dedup_hash for finding in findings])
 
-            # Track hashes accepted as new within this batch
-            accepted_hashes: set[str] = set()
+        seen_dict = self._get_recent_hashes(
+            [finding.dedup_hash for finding in findings],
+            cutoff,
+        )
+        seen_hashes = set(seen_dict.keys())
 
-            for finding in findings:
-                h = finding.dedup_hash
+        # Track hashes accepted as new within this batch
+        accepted_hashes: set[str] = set()
 
-                if h in seen_hashes:
-                    # Map issue ID directly from local database
-                    issue_id, issue_state = seen_dict[h]
-                    finding.redmine_issue_id = issue_id
-                    if issue_state:
-                        finding.issue_state = issue_state
-                    
-                    # Known from a previous cycle — route to update path
-                    finding.dedup_reason = "repeat_within_ttl"
-                    if h in repeat_map:
-                        repeat_map[h] = (repeat_map[h][0], repeat_map[h][1] + 1)
-                    else:
-                        repeat_map[h] = (finding, 1)
-                elif h in accepted_hashes:
-                    # Same-batch duplicate — collapse into repeat bucket
-                    finding.dedup_reason = "same_batch_duplicate"
-                    if h in repeat_map:
-                        repeat_map[h] = (repeat_map[h][0], repeat_map[h][1] + 1)
-                    else:
-                        repeat_map[h] = (finding, 1)
+        for finding in findings:
+            h = finding.dedup_hash
+
+            if h in seen_hashes:
+                # Map issue ID directly from the state backend
+                issue_id, issue_state = seen_dict[h]
+                finding.redmine_issue_id = issue_id
+                if issue_state:
+                    finding.issue_state = issue_state
+
+                # Known from a previous cycle — route to update path
+                finding.dedup_reason = "repeat_within_ttl"
+                if h in repeat_map:
+                    repeat_map[h] = (repeat_map[h][0], repeat_map[h][1] + 1)
                 else:
-                    # Genuinely new finding or expired TTL finding
-                    if h in all_known_hashes:
-                        finding.dedup_reason = "expired_hash"
-                    else:
-                        finding.dedup_reason = "new_hash"
-                    accepted_hashes.add(h)
-                    new_findings.append(finding)
+                    repeat_map[h] = (finding, 1)
+            elif h in accepted_hashes:
+                # Same-batch duplicate — collapse into repeat bucket
+                finding.dedup_reason = "same_batch_duplicate"
+                if h in repeat_map:
+                    repeat_map[h] = (repeat_map[h][0], repeat_map[h][1] + 1)
+                else:
+                    repeat_map[h] = (finding, 1)
+            else:
+                # Genuinely new finding or expired TTL finding
+                if h in all_known_hashes:
+                    finding.dedup_reason = "expired_hash"
+                else:
+                    finding.dedup_reason = "new_hash"
+                accepted_hashes.add(h)
+                new_findings.append(finding)
 
 
 
@@ -187,7 +188,7 @@ class DeduplicatorStage:
         confirms that the findings were successfully created/updated.
         This prevents silent data loss during Redmine outages.
         """
-        if not self._conn or not findings:
+        if (not self._conn and not self._state_store) or not findings:
             return
 
         now = time.time()
@@ -206,22 +207,26 @@ class DeduplicatorStage:
             for finding in findings
         ]
 
-        with self._conn:
-            self._conn.executemany(
-                """
-                INSERT OR REPLACE INTO seen_hashes
-                (hash, source, title, first_seen, last_seen, count, flushed_count, redmine_issue_id, issue_state)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                records,
-            )
+        if self._state_store:
+            self._state_store.commit_new(records)
+        else:
+            assert self._conn is not None
+            with self._conn:
+                self._conn.executemany(
+                    """
+                    INSERT OR REPLACE INTO seen_hashes
+                    (hash, source, title, first_seen, last_seen, count, flushed_count, redmine_issue_id, issue_state)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    records,
+                )
         logger.info("Deduplicator: committed %d findings after successful output", len(findings))
 
     def commit_updates(self, findings: list[Finding]) -> None:
         """
         Commit successful update lifecycle checks back to the local database mapping.
         """
-        if not self._conn or not findings:
+        if (not self._conn and not self._state_store) or not findings:
             return
 
         now = time.time()
@@ -240,20 +245,24 @@ class DeduplicatorStage:
             for finding in findings
         ]
 
-        with self._conn:
-            self._conn.executemany(
-                """
-                INSERT INTO seen_hashes
-                (hash, source, title, first_seen, last_seen, count, flushed_count, redmine_issue_id, issue_state)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(hash) DO UPDATE SET
-                    redmine_issue_id = excluded.redmine_issue_id,
-                    issue_state = excluded.issue_state,
-                    last_seen = MAX(seen_hashes.last_seen, excluded.last_seen),
-                    count = seen_hashes.count + excluded.count
-                """,
-                records
-            )
+        if self._state_store:
+            self._state_store.commit_updates(records)
+        else:
+            assert self._conn is not None
+            with self._conn:
+                self._conn.executemany(
+                    """
+                    INSERT INTO seen_hashes
+                    (hash, source, title, first_seen, last_seen, count, flushed_count, redmine_issue_id, issue_state)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(hash) DO UPDATE SET
+                        redmine_issue_id = excluded.redmine_issue_id,
+                        issue_state = excluded.issue_state,
+                        last_seen = MAX(seen_hashes.last_seen, excluded.last_seen),
+                        count = seen_hashes.count + excluded.count
+                    """,
+                    records
+                )
         logger.info("Deduplicator: committed mapped IDs for %d updated findings", len(findings))
 
     def cleanup(self) -> None:
@@ -265,6 +274,8 @@ class DeduplicatorStage:
 
     def _get_recent_hashes(self, hash_values: list[str], cutoff: float) -> dict[str, tuple[int|None, str|None]]:
         """Fetch hashes seen within the active TTL window in a small number of queries."""
+        if self._state_store:
+            return self._state_store.get_recent_hashes(hash_values, cutoff)
         assert self._conn is not None
         if not hash_values:
             return {}
@@ -292,6 +303,8 @@ class DeduplicatorStage:
 
     def _get_all_hashes(self, hash_values: list[str]) -> set[str]:
         """Fetch hashes that exist in the database regardless of TTL."""
+        if self._state_store:
+            return self._state_store.get_all_hashes(hash_values)
         assert self._conn is not None
         if not hash_values:
             return set()
@@ -350,9 +363,14 @@ class DeduplicatorStage:
 
     def _purge_expired(self, cutoff: float | None = None, commit: bool = True) -> None:
         """Remove entries older than TTL."""
-        assert self._conn is not None
         if cutoff is None:
             cutoff = time.time() - self.ttl_seconds
+        if self._state_store:
+            rowcount = self._state_store.cleanup_dedup(cutoff)
+            if rowcount > 0:
+                logger.info("Deduplicator: purged %d expired entries", rowcount)
+            return
+        assert self._conn is not None
         cursor = self._conn.execute(
             "DELETE FROM seen_hashes WHERE last_seen < ?",
             (cutoff,),
@@ -364,6 +382,8 @@ class DeduplicatorStage:
 
     def get_stats(self) -> dict[str, int]:
         """Return database statistics."""
+        if self._state_store:
+            return self._state_store.get_dedup_stats()
         if not self._conn:
             return {"total": 0}
         cursor = self._conn.execute("SELECT COUNT(*) FROM seen_hashes")
@@ -372,6 +392,9 @@ class DeduplicatorStage:
 
     def close(self) -> None:
         """Close the database connection."""
+        if self._state_store:
+            self._state_store.close()
+            self._state_store = None
         if self._conn:
             self._conn.close()
             self._conn = None

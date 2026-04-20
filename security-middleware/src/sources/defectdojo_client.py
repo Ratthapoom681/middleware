@@ -100,10 +100,11 @@ def _normalize_identifier(value: Any) -> str:
 class DefectDojoClient:
     """Client for the DefectDojo REST API v2."""
 
-    def __init__(self, config: DefectDojoConfig):
+    def __init__(self, config: DefectDojoConfig, checkpoint_store: Any | None = None):
         self.config = config
         self.base_url = config.base_url.rstrip("/")
         self.cursor_path = Path(config.cursor_path)
+        self._checkpoint_store = checkpoint_store
         self.session = requests.Session()
         self.session.verify = config.verify_ssl
         self.session.headers.update({
@@ -254,7 +255,7 @@ class DefectDojoClient:
 
     def checkpoint_enabled(self) -> bool:
         """Return True when incremental checkpoint persistence is configured."""
-        return bool(_clean_text(self.config.cursor_path))
+        return bool(self._checkpoint_store or _clean_text(self.config.cursor_path))
 
     def get_pending_checkpoint(self) -> dict[str, Any] | None:
         """Expose the most recent fetched checkpoint boundary without persisting it."""
@@ -412,6 +413,15 @@ class DefectDojoClient:
 
     def _load_cursor(self) -> dict[str, Any] | None:
         """Load the persisted checkpoint for incremental DefectDojo polling."""
+        if self._checkpoint_store:
+            data = self._checkpoint_store.load_checkpoint(
+                self._checkpoint_key(),
+                self._cursor_signature(),
+            )
+            if not data:
+                return None
+            return self._normalize_checkpoint_payload(data)
+
         if not self.cursor_path.exists():
             return None
 
@@ -425,6 +435,10 @@ class DefectDojoClient:
             logger.info("DefectDojo: checkpoint filters changed, resetting incremental checkpoint")
             return None
 
+        return self._normalize_checkpoint_payload(data)
+
+    def _normalize_checkpoint_payload(self, data: dict[str, Any]) -> dict[str, Any] | None:
+        """Validate a checkpoint payload loaded from any storage backend."""
         last_status_update = data.get("last_status_update")
         last_id = data.get("last_id")
         if not last_status_update or last_id is None:
@@ -433,22 +447,40 @@ class DefectDojoClient:
         return {
             "last_status_update": str(last_status_update),
             "last_id": int(last_id),
-            "signature": data["signature"],
         }
 
     def _save_cursor(self, state: dict[str, Any]) -> None:
         """Persist the latest successfully processed DefectDojo checkpoint."""
         payload = {
-            "version": 1,
-            "signature": self._cursor_signature(),
             "last_status_update": state["last_status_update"],
             "last_id": int(state["last_id"]),
+        }
+
+        if self._checkpoint_store:
+            try:
+                self._checkpoint_store.save_checkpoint(
+                    self._checkpoint_key(),
+                    self._cursor_signature(),
+                    payload,
+                )
+            except Exception as exc:
+                logger.warning("DefectDojo: failed to persist checkpoint state: %s", exc)
+            return
+
+        payload = {
+            "version": 1,
+            "signature": self._cursor_signature(),
+            **payload,
         }
         try:
             self.cursor_path.parent.mkdir(parents=True, exist_ok=True)
             self.cursor_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         except OSError as exc:
             logger.warning("DefectDojo: failed to persist checkpoint state: %s", exc)
+
+    def _checkpoint_key(self) -> str:
+        """Build a stable shared-storage key for this incremental cursor."""
+        return f"defectdojo:{self.config.cursor_path or 'default'}"
 
     def _make_cursor_state(self, dd_finding: dict[str, Any]) -> dict[str, Any] | None:
         """Extract a stable high-watermark from a DefectDojo finding."""

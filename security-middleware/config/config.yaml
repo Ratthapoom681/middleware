@@ -95,6 +95,15 @@ pipeline:
     # Add remediation links
     add_remediation_links: true
 
+# --- Shared State Storage ---
+storage:
+  # local = SQLite dedup + file checkpoints, postgres = shared state for multi-instance/high-volume setups
+  backend: "local"
+  postgres_dsn: ""
+  postgres_schema: "public"
+  dedup_table: "middleware_seen_hashes"
+  checkpoint_table: "middleware_checkpoints"
+
 # --- Logging ---
 logging:
   level: "INFO"                   # DEBUG, INFO, WARNING, ERROR

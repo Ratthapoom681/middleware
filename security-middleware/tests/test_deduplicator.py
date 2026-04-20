@@ -220,3 +220,72 @@ class TestDeduplicator:
         new_findings, _ = dedup_stage.process([_make_wazuh_finding(title="Another", host="other", source_id="002")])
         dedup_stage.commit_new(new_findings)
         assert dedup_stage.get_stats()["total_tracked"] == 2
+
+    def test_can_use_external_state_store_backend(self):
+        class FakeStateStore:
+            def __init__(self):
+                self.records = {}
+                self.closed = False
+
+            def get_recent_hashes(self, hash_values, cutoff):
+                return {
+                    hash_value: (record.get("redmine_issue_id"), record.get("issue_state"))
+                    for hash_value, record in self.records.items()
+                    if hash_value in hash_values and record["last_seen"] > cutoff
+                }
+
+            def get_all_hashes(self, hash_values):
+                return {hash_value for hash_value in hash_values if hash_value in self.records}
+
+            def commit_new(self, records):
+                for record in records:
+                    self.records[record[0]] = {
+                        "last_seen": record[4],
+                        "redmine_issue_id": record[7],
+                        "issue_state": record[8],
+                    }
+
+            def commit_updates(self, records):
+                for record in records:
+                    self.records[record[0]] = {
+                        "last_seen": record[4],
+                        "redmine_issue_id": record[7],
+                        "issue_state": record[8],
+                    }
+
+            def cleanup_dedup(self, cutoff):
+                before = len(self.records)
+                self.records = {
+                    hash_value: record
+                    for hash_value, record in self.records.items()
+                    if record["last_seen"] >= cutoff
+                }
+                return before - len(self.records)
+
+            def get_dedup_stats(self):
+                return {"total_tracked": len(self.records)}
+
+            def close(self):
+                self.closed = True
+
+        state_store = FakeStateStore()
+        stage = DeduplicatorStage(
+            DedupConfig(enabled=True, db_path="unused.db", ttl_hours=1),
+            state_store=state_store,
+        )
+
+        first = _make_wazuh_finding(source_id="001")
+        new_findings, repeat_findings = stage.process([first])
+        assert len(new_findings) == 1
+        assert repeat_findings == []
+
+        stage.commit_new(new_findings)
+        duplicate = _make_wazuh_finding(source_id="002")
+        new_findings, repeat_findings = stage.process([duplicate])
+
+        assert new_findings == []
+        assert len(repeat_findings) == 1
+        assert stage.get_stats()["total_tracked"] == 1
+
+        stage.close()
+        assert state_store.closed is True

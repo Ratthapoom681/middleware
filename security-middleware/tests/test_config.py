@@ -85,3 +85,21 @@ def test_filter_config_builds_advanced_json_rules():
     assert rule.match == "all"
     assert rule.conditions[0].path == "decoder.name"
     assert rule.conditions[1].op == "contains"
+
+
+def test_storage_config_builds_postgres_backend():
+    config = _build_config({
+        "storage": {
+            "backend": "postgres",
+            "postgres_dsn": "postgresql://middleware:secret@db/security",
+            "postgres_schema": "middleware",
+            "dedup_table": "seen_hashes",
+            "checkpoint_table": "checkpoints",
+        }
+    })
+
+    assert config.storage.backend == "postgres"
+    assert config.storage.postgres_dsn == "postgresql://middleware:secret@db/security"
+    assert config.storage.postgres_schema == "middleware"
+    assert config.storage.dedup_table == "seen_hashes"
+    assert config.storage.checkpoint_table == "checkpoints"
