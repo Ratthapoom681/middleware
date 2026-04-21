@@ -244,6 +244,9 @@ function populateForm(c) {
     setVal('storage-postgres_schema', c.storage?.postgres_schema || 'public');
     setVal('storage-dedup_table', c.storage?.dedup_table || 'middleware_seen_hashes');
     setVal('storage-checkpoint_table', c.storage?.checkpoint_table || 'middleware_checkpoints');
+    setVal('storage-ticket_state_table', c.storage?.ticket_state_table || 'middleware_ticket_state');
+    setVal('storage-outbound_queue_table', c.storage?.outbound_queue_table || 'middleware_outbound_queue');
+    setVal('storage-ingest_event_table', c.storage?.ingest_event_table || 'middleware_ingest_events');
     setVal('logging-level', c.logging?.level);
     setVal('logging-format', c.logging?.format);
     setVal('pipeline-poll_interval', c.pipeline?.poll_interval);
@@ -363,6 +366,9 @@ function collectForm() {
                 db_path:   getVal('dedup-db_path'),
                 ttl_hours: getInt('dedup-ttl_hours', 168),
             },
+            delivery: {
+                ...((base.pipeline || {}).delivery || {}),
+            },
             enrichment: {
                 ...((base.pipeline || {}).enrichment || {}),
                 asset_inventory_enabled: getChecked('enrichment-asset_inventory_enabled'),
@@ -377,6 +383,9 @@ function collectForm() {
             postgres_schema:  getVal('storage-postgres_schema') || 'public',
             dedup_table:      getVal('storage-dedup_table') || 'middleware_seen_hashes',
             checkpoint_table: getVal('storage-checkpoint_table') || 'middleware_checkpoints',
+            ticket_state_table: getVal('storage-ticket_state_table') || ((base.storage || {}).ticket_state_table || 'middleware_ticket_state'),
+            outbound_queue_table: getVal('storage-outbound_queue_table') || ((base.storage || {}).outbound_queue_table || 'middleware_outbound_queue'),
+            ingest_event_table: getVal('storage-ingest_event_table') || ((base.storage || {}).ingest_event_table || 'middleware_ingest_events'),
         },
         logging: {
             ...(base.logging || {}),

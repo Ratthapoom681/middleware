@@ -90,6 +90,9 @@ python -m src.main --once
 # Run the Redmine delivery worker for queued jobs
 python -m src.main --delivery-worker
 
+# Run the persisted-ingest decision worker
+python -m src.main --decision-worker
+
 # Test connections only
 python -m src.main --test
 
@@ -280,6 +283,7 @@ storage:
   checkpoint_table: "middleware_checkpoints"
   ticket_state_table: "middleware_ticket_state"
   outbound_queue_table: "middleware_outbound_queue"
+  ingest_event_table: "middleware_ingest_events"
 
 pipeline:
   delivery:
@@ -294,8 +298,13 @@ pipeline:
 When `storage.backend` is set to `postgres`:
 - dedup state moves from local SQLite into Postgres
 - DefectDojo incremental checkpoints move from local JSON files into Postgres
-- ticket-state cache and outbound queue can use the same shared Postgres schema
+- ticket-state cache, ingest-event staging, and outbound queue can use the same shared Postgres schema
 - multiple middleware instances can share the same state safely
+
+When `pipeline.delivery.store_first_ingest` is enabled:
+- raw Wazuh and DefectDojo payloads are persisted into `storage.ingest_event_table` before filter/dedup/enrich runs
+- the normal poller can process those persisted events immediately, or you can drain them with `python -m src.main --decision-worker`
+- DefectDojo checkpoints only advance after the persisted ingest batch has been processed successfully
 
 ---
 

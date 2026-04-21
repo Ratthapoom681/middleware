@@ -105,6 +105,7 @@ def test_postgres_init_creates_ticket_state_and_outbound_queue_tables():
             checkpoint_table="checkpoints",
             ticket_state_table="ticket_state",
             outbound_queue_table="outbound_jobs",
+            ingest_event_table="ingest_events",
         ),
         dbapi_module=fake_dbapi,
     )
@@ -112,6 +113,7 @@ def test_postgres_init_creates_ticket_state_and_outbound_queue_tables():
     init_sql = "\n".join(query for query, _ in fake_dbapi.connection.execute_calls)
     assert "CREATE TABLE IF NOT EXISTS \"middleware\".\"ticket_state\"" in init_sql
     assert "CREATE TABLE IF NOT EXISTS \"middleware\".\"outbound_jobs\"" in init_sql
+    assert "CREATE TABLE IF NOT EXISTS \"middleware\".\"ingest_events\"" in init_sql
     assert "last_ticket_check_at" in init_sql
     assert "next_attempt_at" in init_sql
 
@@ -172,3 +174,64 @@ def test_postgres_claim_outbound_jobs_uses_skip_locked_and_processing_transition
     assert params == (5, "worker-a")
     assert claimed[0]["job_id"] == "job-1"
     assert claimed[0]["action"] == "create_ticket"
+
+
+def test_postgres_append_and_claim_ingest_events_support_id_scoping():
+    fake_dbapi = _FakeDbApi()
+    fake_dbapi.connection.fetchall_result = [
+        (
+            "evt-1",
+            "wazuh",
+            "alert-1",
+            "2026-04-21T00:00:00+00:00",
+            "high",
+            "5710",
+            "web-01",
+            "10.0.0.1",
+            None,
+            None,
+            "{\"rule\": {\"id\": \"5710\"}}",
+            "{\"source\": \"wazuh\", \"source_id\": \"alert-1\"}",
+        ),
+    ]
+    store = PostgresStateStore(
+        StorageConfig(
+            backend="postgres",
+            postgres_dsn="postgresql://middleware:secret@db/security",
+            postgres_schema="middleware",
+            dedup_table="seen_hashes",
+            checkpoint_table="checkpoints",
+            ticket_state_table="ticket_state",
+            outbound_queue_table="outbound_jobs",
+            ingest_event_table="ingest_events",
+        ),
+        dbapi_module=fake_dbapi,
+    )
+
+    store.append_ingest_events(
+        [
+            {
+                "event_id": "evt-1",
+                "source": "wazuh",
+                "source_id": "alert-1",
+                "event_timestamp": "2026-04-21T00:00:00+00:00",
+                "severity": "high",
+                "rule_id": "5710",
+                "host": "web-01",
+                "srcip": "10.0.0.1",
+                "raw_payload": {"rule": {"id": "5710"}},
+                "finding_payload": {"source": "wazuh", "source_id": "alert-1"},
+            }
+        ]
+    )
+    insert_query, records = fake_dbapi.connection.executemany_calls[-1]
+    assert "INSERT INTO \"middleware\".\"ingest_events\"" in insert_query
+    assert records[0][0] == "evt-1"
+
+    claimed = store.claim_ingest_events("decision-a", limit=10, event_ids=["evt-1"])
+    claim_query, claim_params = fake_dbapi.connection.execute_calls[-1]
+    assert "FOR UPDATE SKIP LOCKED" in claim_query
+    assert "event_id = ANY(%s)" in claim_query
+    assert claim_params == (["evt-1"], 10, "decision-a")
+    assert claimed[0]["event_id"] == "evt-1"
+    assert claimed[0]["finding_payload"]["source_id"] == "alert-1"

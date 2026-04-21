@@ -228,6 +228,47 @@ def test_config_api_round_trips_storage_backend(workspace_tmp_dir, monkeypatch):
         assert saved["storage"]["checkpoint_table"] == "checkpoints"
 
 
+def test_config_api_round_trips_delivery_settings(workspace_tmp_dir, monkeypatch):
+    config_path = workspace_tmp_dir / "config.yaml"
+    backup_dir = workspace_tmp_dir / "backups"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "pipeline": {
+                    "delivery": {
+                        "async_enabled": True,
+                        "worker_poll_interval": 10,
+                        "worker_batch_size": 20,
+                        "retry_delay_seconds": 60,
+                        "recheck_ttl_minutes": 15,
+                        "store_first_ingest": True,
+                    }
+                }
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(server, "CONFIG_PATH", config_path)
+    monkeypatch.setattr(server, "BACKUP_DIR", backup_dir)
+
+    with server.app.test_client() as client:
+        response = client.get("/api/config")
+        payload = response.get_json()["config"]
+
+        assert payload["pipeline"]["delivery"]["async_enabled"] is True
+        assert payload["pipeline"]["delivery"]["store_first_ingest"] is True
+
+        save_response = client.post("/api/config", json=payload)
+        assert save_response.get_json()["status"] == "ok"
+
+        saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        assert saved["pipeline"]["delivery"]["async_enabled"] is True
+        assert saved["pipeline"]["delivery"]["worker_batch_size"] == 20
+        assert saved["pipeline"]["delivery"]["store_first_ingest"] is True
+
+
 def test_static_ui_assets_reference_new_defectdojo_fields():
     html = (server.PROJECT_ROOT / "web" / "static" / "index.html").read_text(encoding="utf-8")
     js = (server.PROJECT_ROOT / "web" / "static" / "js" / "app.js").read_text(encoding="utf-8")

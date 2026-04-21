@@ -11,6 +11,7 @@ Orchestrates the full pipeline:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import logging
 import signal
 import sys
@@ -151,6 +152,7 @@ class MiddlewarePipeline:
 
         # --- 1. Ingest ---
         findings: list[Finding] = []
+        wazuh_findings: list[Finding] = []
 
         logger.info("--- Ingesting from Wazuh ---")
         try:
@@ -174,6 +176,70 @@ class MiddlewarePipeline:
                 logger.error("DefectDojo ingestion failed: %s", e)
         else:
             logger.debug("DefectDojo: disabled, skipping")
+
+        if self._store_first_ingest_enabled():
+            persisted_event_ids: list[str] = []
+            if findings:
+                try:
+                    persisted_event_ids = self.persist_ingested_findings(findings)
+                except Exception:
+                    self.defectdojo.discard_pending_checkpoint()
+                    raise
+
+            remaining_event_ids = list(persisted_event_ids)
+            aggregated_stats = {
+                "ingested": 0,
+                "filtered": 0,
+                "deduplicated": 0,
+                "created": 0,
+                "updated": 0,
+                "reopened": 0,
+                "recreated": 0,
+                "queued": 0,
+                "failed": 0,
+            }
+            overall_success = True
+
+            while remaining_event_ids:
+                outcome = self.process_ingest_queue_once(
+                    cycle_start=cycle_start,
+                    event_context={
+                        "origin": "poll",
+                        "alert_count": len(persisted_event_ids),
+                        "source_counts": {
+                            "wazuh": len(wazuh_findings),
+                            "defectdojo": len(dd_findings),
+                        },
+                    },
+                    event_ids=remaining_event_ids,
+                )
+                if not outcome:
+                    overall_success = False
+                    break
+
+                for key, value in outcome.get("stats", {}).items():
+                    aggregated_stats[key] = aggregated_stats.get(key, 0) + int(value or 0)
+
+                processed_event_ids = set(outcome.get("event_ids", []))
+                remaining_event_ids = [
+                    event_id for event_id in remaining_event_ids if event_id not in processed_event_ids
+                ]
+                if not outcome.get("successful", False):
+                    overall_success = False
+                    break
+
+            if dd_findings:
+                if overall_success and not remaining_event_ids and aggregated_stats.get("failed", 0) == 0:
+                    self.defectdojo.commit_pending_checkpoint()
+                else:
+                    logger.warning(
+                        "DefectDojo: store-first processing did not fully succeed; checkpoint will not advance"
+                    )
+                    self.defectdojo.discard_pending_checkpoint()
+
+            stats = aggregated_stats
+            stats["persisted"] = len(persisted_event_ids)
+            return stats
 
         if not findings:
             logger.info("No findings to process this cycle")
@@ -219,7 +285,7 @@ class MiddlewarePipeline:
         Process a batch of pre-ingested findings through the pipeline:
           filter → map → dedup → enrich → output
         """
-        if not cycle_start:
+        if cycle_start is None:
             cycle_start = datetime.now(timezone.utc)
             
         original_findings = list(findings)
@@ -253,14 +319,9 @@ class MiddlewarePipeline:
         sync_stats = {"created": 0, "updated": 0, "failed": 0, "reopened": 0, "recreated": 0}
 
         if async_delivery_enabled:
-            logger.info("--- Queueing Wazuh findings for async Redmine delivery ---")
-            async_new = [finding for finding in new_findings if finding.source.value == "wazuh"]
-            async_repeat = [finding for finding in repeat_findings if finding.source.value == "wazuh"]
-            sync_new = [finding for finding in new_findings if finding.source.value != "wazuh"]
-            sync_repeat = [finding for finding in repeat_findings if finding.source.value != "wazuh"]
-
-            queue_stats = self._enqueue_redmine_jobs(async_new, async_repeat)
-            sync_stats, successful_new, successful_repeat = self._deliver_findings(sync_new, sync_repeat)
+            logger.info("--- Queueing findings for async Redmine delivery ---")
+            planned_jobs = self._plan_async_redmine_jobs(new_findings, repeat_findings)
+            queue_stats = self._enqueue_redmine_jobs(planned_jobs)
         else:
             sync_stats, successful_new, successful_repeat = self._deliver_findings(new_findings, repeat_findings)
 
@@ -356,6 +417,102 @@ class MiddlewarePipeline:
             return False
         return True
 
+    def _store_first_ingest_enabled(self) -> bool:
+        """Return whether store-first ingest is enabled and backed by shared Postgres state."""
+        if not self.config.pipeline.delivery.store_first_ingest:
+            return False
+        if not self.state_store or not hasattr(self.state_store, "append_ingest_events"):
+            logger.warning("Store-first ingest is enabled but shared Postgres state is unavailable; using in-memory processing")
+            return False
+        return True
+
+    def persist_ingested_findings(self, findings: list[Finding]) -> list[str]:
+        """Persist raw ingested findings before any downstream processing."""
+        if not self._store_first_ingest_enabled():
+            return []
+
+        assert self.state_store is not None
+        records: list[dict[str, Any]] = []
+        event_ids: list[str] = []
+        for finding in findings:
+            event_id = str(uuid4())
+            event_ids.append(event_id)
+            finding_payload = finding.to_dict()
+            records.append(
+                {
+                    "event_id": event_id,
+                    "source": finding.source.value,
+                    "source_id": finding.source_id,
+                    "event_timestamp": finding.timestamp.isoformat(),
+                    "severity": finding.severity.value,
+                    "rule_id": finding.rule_id,
+                    "host": finding.host,
+                    "srcip": finding.srcip,
+                    "found_by": finding.found_by,
+                    "endpoint_url": finding.endpoint_url,
+                    "raw_payload": finding.raw_data,
+                    "finding_payload": finding_payload,
+                    "status": "pending",
+                }
+            )
+
+        self.state_store.append_ingest_events(records)
+        logger.info("Persisted %d ingest event(s) before downstream processing", len(records))
+        return event_ids
+
+    def process_ingest_queue_once(
+        self,
+        *,
+        cycle_start: datetime | None = None,
+        event_context: dict[str, Any] | None = None,
+        event_ids: list[str] | None = None,
+    ) -> dict[str, Any] | None:
+        """Claim and process one batch of persisted ingest events."""
+        if not self._store_first_ingest_enabled():
+            return None
+
+        assert self.state_store is not None
+        batch_size = self.config.pipeline.delivery.worker_batch_size
+        worker_id = f"decision-{uuid4()}"
+        claimed_events = self.state_store.claim_ingest_events(worker_id, limit=batch_size, event_ids=event_ids)
+        if not claimed_events:
+            return None
+
+        findings: list[Finding] = []
+        for event in claimed_events:
+            payload = dict(event.get("finding_payload", {}) or {})
+            payload["raw_data"] = event.get("raw_payload", {}) or payload.get("raw_data", {})
+            findings.append(Finding.from_dict(payload))
+
+        event_ids = [event["event_id"] for event in claimed_events]
+        source_counts: dict[str, int] = {}
+        for event in claimed_events:
+            source = str(event.get("source") or "unknown")
+            source_counts[source] = source_counts.get(source, 0) + 1
+
+        merged_context = dict(event_context or {})
+        merged_context.setdefault("origin", "ingest-queue")
+        merged_context["alert_count"] = len(claimed_events)
+        merged_context["source_counts"] = source_counts
+
+        try:
+            outcome = self.process_batch(findings, cycle_start=cycle_start, event_context=merged_context)
+        except Exception as exc:
+            self.state_store.mark_ingest_events_pending(event_ids, str(exc))
+            raise
+
+        successful = outcome.get("stats", {}).get("failed", 0) == 0
+        if successful:
+            self.state_store.mark_ingest_events_processed(event_ids)
+        else:
+            self.state_store.mark_ingest_events_pending(
+                event_ids,
+                "Downstream processing failed for one or more findings",
+            )
+        outcome["successful"] = successful
+        outcome["event_ids"] = event_ids
+        return outcome
+
     def _deliver_findings(
         self,
         new_findings: list[Finding],
@@ -380,6 +537,21 @@ class MiddlewarePipeline:
             )
             update_stats, successful_repeat = self.redmine.create_issues_batch(repeat_findings)
 
+        for finding in successful_new:
+            self._record_ticket_state(
+                finding,
+                last_delivery_status=finding.action or "created",
+                ticket_exists=True,
+                mark_ticket_checked=True,
+            )
+        for finding in successful_repeat:
+            self._record_ticket_state(
+                finding,
+                last_delivery_status=finding.action or "updated",
+                ticket_exists=True,
+                mark_ticket_checked=True,
+            )
+
         stats = {
             "created": create_stats.get("created", 0) + update_stats.get("created", 0),
             "updated": create_stats.get("updated", 0) + update_stats.get("updated", 0),
@@ -389,45 +561,150 @@ class MiddlewarePipeline:
         }
         return stats, successful_new, successful_repeat
 
-    def _enqueue_redmine_jobs(self, new_findings: list[Finding], repeat_findings: list[Finding]) -> dict[str, int]:
-        """Queue Wazuh findings for async Redmine delivery in shared Postgres state."""
+    def _record_ticket_state(
+        self,
+        finding: Finding,
+        *,
+        last_delivery_status: str,
+        last_error: str | None = None,
+        ticket_exists: bool | None = None,
+        mark_ticket_checked: bool = False,
+        subject: str | None = None,
+        tracker_id: int | None = None,
+    ) -> None:
+        """Persist one ticket-state snapshot when shared Postgres state is enabled."""
+        if not self.state_store or not hasattr(self.state_store, "save_ticket_state"):
+            return
+
+        now = datetime.now(timezone.utc).isoformat()
+        resolved_tracker_id = tracker_id if tracker_id is not None else finding.enrichment.get("selected_tracker")
+        if ticket_exists is None:
+            ticket_exists = bool(finding.redmine_issue_id)
+
+        payload = {
+            "source": finding.source.value,
+            "action": finding.action,
+            "last_delivery_status": last_delivery_status,
+        }
+
+        kwargs: dict[str, Any] = {
+            "redmine_issue_id": finding.redmine_issue_id,
+            "issue_state": finding.issue_state,
+            "tracker_id": resolved_tracker_id,
+            "subject": subject or finding.title,
+            "ticket_exists": ticket_exists,
+            "last_delivery_status": last_delivery_status,
+            "last_error": last_error,
+            "payload": payload,
+        }
+        if mark_ticket_checked:
+            kwargs["last_ticket_check_at"] = now
+            if ticket_exists:
+                kwargs["last_ticket_seen_at"] = now
+
+        self.state_store.save_ticket_state(finding.dedup_hash, **kwargs)
+
+    def _ticket_state_needs_recheck(self, ticket_state: dict[str, Any] | None) -> bool:
+        """Return whether a cached ticket state is stale enough to recheck."""
+        if ticket_state is None:
+            return True
+
+        last_check_raw = ticket_state.get("last_ticket_check_at")
+        if not last_check_raw:
+            return True
+
+        if isinstance(last_check_raw, datetime):
+            last_check = last_check_raw
+        else:
+            try:
+                last_check = datetime.fromisoformat(str(last_check_raw).replace("Z", "+00:00"))
+            except ValueError:
+                return True
+
+        ttl = timedelta(minutes=self.config.pipeline.delivery.recheck_ttl_minutes)
+        return datetime.now(timezone.utc) - last_check >= ttl
+
+    def _plan_async_redmine_jobs(
+        self,
+        new_findings: list[Finding],
+        repeat_findings: list[Finding],
+    ) -> dict[str, list[Finding]]:
+        """Plan queue actions using dedup results plus cached ticket state."""
+        planned = {
+            "create_ticket": list(new_findings),
+            "update_ticket": [],
+            "reopen_ticket": [],
+            "recreate_ticket": [],
+            "recheck_ticket": [],
+        }
+
+        for finding in repeat_findings:
+            ticket_state = None
+            if self.state_store and hasattr(self.state_store, "get_ticket_state"):
+                with contextlib.suppress(Exception):
+                    ticket_state = self.state_store.get_ticket_state(finding.dedup_hash)
+
+            if ticket_state:
+                if ticket_state.get("redmine_issue_id") and not finding.redmine_issue_id:
+                    finding.redmine_issue_id = ticket_state.get("redmine_issue_id")
+                if ticket_state.get("issue_state"):
+                    finding.issue_state = str(ticket_state["issue_state"])
+
+            if not finding.redmine_issue_id and not (ticket_state and ticket_state.get("redmine_issue_id")):
+                planned["create_ticket"].append(finding)
+                continue
+
+            if ticket_state and ticket_state.get("ticket_exists") is False:
+                planned["recreate_ticket"].append(finding)
+            elif ticket_state and str(ticket_state.get("issue_state", "")).lower() in {"closed", "resolved"}:
+                planned["reopen_ticket"].append(finding)
+            elif self._ticket_state_needs_recheck(ticket_state):
+                planned["recheck_ticket"].append(finding)
+            else:
+                planned["update_ticket"].append(finding)
+
+        return planned
+
+    def _enqueue_redmine_jobs(self, planned_jobs: dict[str, list[Finding]]) -> dict[str, int]:
+        """Queue findings for async Redmine delivery in shared Postgres state."""
         assert self.state_store is not None
 
-        queued = 0
+        queued_findings: list[tuple[str, Finding]] = []
+        queued_job_ids: list[str] = []
         failed = 0
-        for action, bucket in (("create_ticket", new_findings), ("update_ticket", repeat_findings)):
+        for action, bucket in planned_jobs.items():
             for finding in bucket:
                 try:
-                    if action == "update_ticket" and not finding.redmine_issue_id:
-                        logger.debug(
-                            "Skipping queued update for %s because no Redmine issue ID is known yet",
-                            finding.dedup_hash,
-                        )
-                        continue
                     self.redmine._evaluate_routing(finding)
-                    finding.action = "queued"
-                    job_id = f"{action}:{finding.dedup_hash}"
+                    job_id = f"{action}:{finding.dedup_hash}:{uuid4()}"
                     self.state_store.enqueue_outbound_job(
                         job_id=job_id,
                         dedup_hash=finding.dedup_hash,
                         action=action,
                         payload={"finding": finding.to_dict()},
                     )
-                    self.state_store.save_ticket_state(
-                        finding.dedup_hash,
-                        redmine_issue_id=finding.redmine_issue_id,
-                        issue_state=finding.issue_state,
-                        tracker_id=finding.enrichment.get("selected_tracker"),
-                        subject=finding.title,
-                        last_delivery_status="queued",
-                        payload={"source": finding.source.value, "action": action},
-                    )
-                    queued += 1
+                    queued_job_ids.append(job_id)
+                    queued_findings.append((action, finding))
                 except Exception as exc:
                     finding.action = "failed"
                     failed += 1
                     logger.error("Failed to enqueue Redmine job for %s: %s", finding.dedup_hash, exc)
-        return {"queued": queued, "failed": failed}
+
+        if failed > 0:
+            if queued_job_ids and hasattr(self.state_store, "delete_outbound_jobs"):
+                self.state_store.delete_outbound_jobs(queued_job_ids)
+            for _, finding in queued_findings:
+                finding.action = "failed"
+            return {"queued": 0, "failed": failed + len(queued_findings)}
+
+        for action, finding in queued_findings:
+            finding.action = "queued"
+            self._record_ticket_state(
+                finding,
+                last_delivery_status="queued",
+                ticket_exists=action not in {"create_ticket", "recreate_ticket"},
+            )
+        return {"queued": len(queued_findings), "failed": 0}
 
     def process_delivery_queue_once(self) -> dict[str, int]:
         """Claim one batch of queued Redmine jobs and process them."""
@@ -447,6 +724,12 @@ class MiddlewarePipeline:
         for job in jobs:
             job_id = job["job_id"]
             try:
+                if job["action"] == "recheck_ticket":
+                    self._process_recheck_job(job)
+                    self.state_store.mark_outbound_job_succeeded(job_id)
+                    succeeded += 1
+                    continue
+
                 finding_payload = dict(job.get("payload", {}).get("finding", {}) or {})
                 finding = Finding.from_dict(finding_payload)
                 _, successful = self.redmine.create_issues_batch([finding])
@@ -459,27 +742,102 @@ class MiddlewarePipeline:
                 else:
                     self.dedup_stage.commit_updates([delivered])
 
-                self.state_store.save_ticket_state(
-                    delivered.dedup_hash,
-                    redmine_issue_id=delivered.redmine_issue_id,
-                    issue_state=delivered.issue_state,
-                    tracker_id=delivered.enrichment.get("selected_tracker"),
-                    subject=delivered.title,
-                    last_ticket_check_at=datetime.now(timezone.utc).isoformat(),
-                    last_ticket_seen_at=datetime.now(timezone.utc).isoformat(),
+                self._record_ticket_state(
+                    delivered,
                     last_delivery_status=delivered.action or "succeeded",
-                    payload={"source": delivered.source.value, "action": job["action"]},
+                    ticket_exists=True,
+                    mark_ticket_checked=True,
                 )
                 self.state_store.mark_outbound_job_succeeded(job_id)
                 succeeded += 1
             except Exception as exc:
                 failed += 1
                 next_attempt_at = (datetime.now(timezone.utc) + timedelta(seconds=retry_delay)).isoformat()
+                finding_payload = dict(job.get("payload", {}).get("finding", {}) or {})
+                if finding_payload:
+                    failed_finding = Finding.from_dict(finding_payload)
+                    failed_finding.action = "failed"
+                    self._record_ticket_state(
+                        failed_finding,
+                        last_delivery_status="retry_scheduled",
+                        ticket_exists=bool(failed_finding.redmine_issue_id),
+                        last_error=str(exc),
+                    )
                 self.state_store.mark_outbound_job_retry(job_id, str(exc), next_attempt_at=next_attempt_at)
                 logger.error("Delivery queue job %s failed: %s", job_id, exc)
 
         self.dedup_stage.cleanup()
         return {"claimed": len(jobs), "succeeded": succeeded, "failed": failed}
+
+    def _process_recheck_job(self, job: dict[str, Any]) -> None:
+        """Refresh cached ticket state and enqueue the correct follow-up delivery action."""
+        assert self.state_store is not None
+
+        finding_payload = dict(job.get("payload", {}).get("finding", {}) or {})
+        finding = Finding.from_dict(finding_payload)
+        ticket_state = self.state_store.get_ticket_state(finding.dedup_hash) or {}
+        if ticket_state.get("redmine_issue_id") and not finding.redmine_issue_id:
+            finding.redmine_issue_id = ticket_state["redmine_issue_id"]
+
+        now = datetime.now(timezone.utc).isoformat()
+        if not finding.redmine_issue_id:
+            next_action = "create_ticket"
+            finding.issue_state = "unknown"
+            self._record_ticket_state(
+                finding,
+                last_delivery_status="rechecked",
+                ticket_exists=False,
+                mark_ticket_checked=True,
+                last_error="No Redmine issue id available for recheck",
+            )
+            self._queue_followup_job(next_action, finding)
+            return
+
+        issue = self.redmine._get_issue(finding.redmine_issue_id)
+        if not issue:
+            finding.issue_state = "missing"
+            self.state_store.save_ticket_state(
+                finding.dedup_hash,
+                redmine_issue_id=finding.redmine_issue_id,
+                issue_state=finding.issue_state,
+                tracker_id=finding.enrichment.get("selected_tracker"),
+                subject=finding.title,
+                ticket_exists=False,
+                last_ticket_check_at=now,
+                last_delivery_status="rechecked",
+                payload={"source": finding.source.value, "action": job["action"]},
+            )
+            self._queue_followup_job("recreate_ticket", finding)
+            return
+
+        status = issue.get("status", {})
+        is_closed = bool(status.get("is_closed", False))
+        finding.issue_state = "closed" if is_closed else "open"
+        self._record_ticket_state(
+            finding,
+            last_delivery_status="rechecked",
+            ticket_exists=True,
+            mark_ticket_checked=True,
+            subject=issue.get("subject") or finding.title,
+            tracker_id=issue.get("tracker", {}).get("id"),
+        )
+        self._queue_followup_job("reopen_ticket" if is_closed else "update_ticket", finding)
+
+    def _queue_followup_job(self, action: str, finding: Finding) -> None:
+        """Queue a follow-up Redmine job after a recheck decision."""
+        assert self.state_store is not None
+        self.redmine._evaluate_routing(finding)
+        self.state_store.enqueue_outbound_job(
+            job_id=f"{action}:{finding.dedup_hash}:{uuid4()}",
+            dedup_hash=finding.dedup_hash,
+            action=action,
+            payload={"finding": finding.to_dict()},
+        )
+        self._record_ticket_state(
+            finding,
+            last_delivery_status="queued",
+            ticket_exists=action not in {"create_ticket", "recreate_ticket"},
+        )
 
     def run_delivery_worker(self) -> None:
         """Run the outbound Redmine delivery queue in a polling loop."""
@@ -510,6 +868,39 @@ class MiddlewarePipeline:
                 time.sleep(1)
 
         logger.info("Delivery worker shutdown complete")
+        self.close()
+
+    def run_decision_worker(self) -> None:
+        """Run the persisted-ingest decision worker in a polling loop."""
+        interval = self.config.pipeline.delivery.worker_poll_interval
+        logger.info("Starting ingest decision worker (poll interval: %ds)", interval)
+
+        while not _shutdown:
+            try:
+                self.check_config_reload()
+                outcome = self.process_ingest_queue_once()
+                if outcome:
+                    stats = outcome.get("stats", {})
+                    logger.info(
+                        "Decision worker processed ingest batch: ingested=%d filtered=%d deduplicated=%d queued=%d failed=%d",
+                        stats.get("ingested", 0),
+                        stats.get("filtered", 0),
+                        stats.get("deduplicated", 0),
+                        stats.get("queued", 0),
+                        stats.get("failed", 0),
+                    )
+            except Exception as exc:
+                logger.exception("Decision worker loop failed: %s", exc)
+
+            if _shutdown:
+                break
+
+            for _ in range(interval):
+                if _shutdown:
+                    break
+                time.sleep(1)
+
+        logger.info("Decision worker shutdown complete")
         self.close()
 
     def run(self) -> None:
@@ -614,6 +1005,11 @@ def main():
         help="Run the Redmine outbound delivery worker only",
     )
     parser.add_argument(
+        "--decision-worker",
+        action="store_true",
+        help="Run the persisted-ingest decision worker only",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Run pipeline but don't create Redmine issues (log only)",
@@ -647,6 +1043,9 @@ def main():
     if args.delivery_worker:
         logger.info("Running Redmine delivery worker only")
         pipeline.run_delivery_worker()
+    elif args.decision_worker:
+        logger.info("Running ingest decision worker only")
+        pipeline.run_decision_worker()
     elif args.once:
         result = pipeline.run_once()
         logger.info("Result: %s", result)

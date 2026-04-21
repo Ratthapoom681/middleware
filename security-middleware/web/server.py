@@ -369,14 +369,52 @@ def wazuh_webhook():
         # Process the batch ad-hoc
         pipeline = MiddlewarePipeline(config)
         try:
-            outcome = pipeline.process_batch(
-                findings,
-                event_context={
-                    "origin": "webhook",
-                    "alert_count": len(data),
-                    "source_counts": {"wazuh": len(findings)},
-                },
-            )
+            if pipeline._store_first_ingest_enabled():
+                event_ids = pipeline.persist_ingested_findings(findings)
+                remaining_event_ids = list(event_ids)
+                aggregated_stats = {
+                    "ingested": 0,
+                    "filtered": 0,
+                    "deduplicated": 0,
+                    "created": 0,
+                    "updated": 0,
+                    "reopened": 0,
+                    "recreated": 0,
+                    "queued": 0,
+                    "failed": 0,
+                }
+
+                while remaining_event_ids:
+                    outcome = pipeline.process_ingest_queue_once(
+                        event_context={
+                            "origin": "webhook",
+                            "alert_count": len(data),
+                            "source_counts": {"wazuh": len(findings)},
+                        },
+                        event_ids=remaining_event_ids,
+                    )
+                    if not outcome:
+                        break
+                    for key, value in outcome.get("stats", {}).items():
+                        aggregated_stats[key] = aggregated_stats.get(key, 0) + int(value or 0)
+                    processed_event_ids = set(outcome.get("event_ids", []))
+                    remaining_event_ids = [
+                        event_id for event_id in remaining_event_ids if event_id not in processed_event_ids
+                    ]
+                    if not outcome.get("successful", False):
+                        break
+
+                outcome = {"stats": aggregated_stats}
+                outcome["stats"]["persisted"] = len(event_ids)
+            else:
+                outcome = pipeline.process_batch(
+                    findings,
+                    event_context={
+                        "origin": "webhook",
+                        "alert_count": len(data),
+                        "source_counts": {"wazuh": len(findings)},
+                    },
+                )
         finally:
             pipeline.close()
 
@@ -428,6 +466,7 @@ def _config_to_dict(config: AppConfig) -> dict:
             "initial_lookback_minutes": config.pipeline.initial_lookback_minutes,
             "filter": asdict(config.pipeline.filter),
             "dedup": asdict(config.pipeline.dedup),
+            "delivery": asdict(config.pipeline.delivery),
             "enrichment": asdict(config.pipeline.enrichment),
         },
         "storage": asdict(config.storage),

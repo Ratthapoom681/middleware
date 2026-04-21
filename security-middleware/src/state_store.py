@@ -39,6 +39,7 @@ class PostgresStateStore:
         self._checkpoint_table = _quote_identifier(config.checkpoint_table)
         self._ticket_state_table = _quote_identifier(config.ticket_state_table)
         self._outbound_queue_table = _quote_identifier(config.outbound_queue_table)
+        self._ingest_event_table = _quote_identifier(config.ingest_event_table)
         self._dashboard_table = _quote_identifier("middleware_dashboard_events")
         self._conn = self._dbapi.connect(config.postgres_dsn)
         self._init_db()
@@ -135,6 +136,43 @@ class PostgresStateStore:
                 )
                 cur.execute(
                     f"""
+                    CREATE TABLE IF NOT EXISTS {self._schema}.{self._ingest_event_table} (
+                        event_id TEXT PRIMARY KEY,
+                        source TEXT NOT NULL,
+                        source_id TEXT NOT NULL,
+                        event_timestamp TIMESTAMPTZ NOT NULL,
+                        severity TEXT NOT NULL,
+                        rule_id TEXT,
+                        host TEXT,
+                        srcip TEXT,
+                        found_by TEXT,
+                        endpoint_url TEXT,
+                        raw_payload TEXT NOT NULL,
+                        finding_payload TEXT NOT NULL,
+                        status TEXT NOT NULL DEFAULT 'pending',
+                        locked_at TIMESTAMPTZ,
+                        locked_by TEXT,
+                        processed_at TIMESTAMPTZ,
+                        last_error TEXT,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                    """
+                )
+                cur.execute(
+                    f"""
+                    CREATE INDEX IF NOT EXISTS {self._ingest_event_index_name('status_created_at')}
+                    ON {self._schema}.{self._ingest_event_table} (status, created_at)
+                    """
+                )
+                cur.execute(
+                    f"""
+                    CREATE INDEX IF NOT EXISTS {self._ingest_event_index_name('source_event_timestamp')}
+                    ON {self._schema}.{self._ingest_event_table} (source, event_timestamp DESC)
+                    """
+                )
+                cur.execute(
+                    f"""
                     CREATE TABLE IF NOT EXISTS {self._schema}.{self._dashboard_table} (
                         event_id TEXT PRIMARY KEY,
                         receive_time TIMESTAMPTZ NOT NULL,
@@ -149,7 +187,7 @@ class PostgresStateStore:
                     """
                 )
         logger.info(
-            "Postgres state store initialized (%s.%s / %s.%s / %s.%s / %s.%s / %s.%s)",
+            "Postgres state store initialized (%s.%s / %s.%s / %s.%s / %s.%s / %s.%s / %s.%s)",
             self.config.postgres_schema,
             self.config.dedup_table,
             self.config.postgres_schema,
@@ -158,6 +196,8 @@ class PostgresStateStore:
             self.config.ticket_state_table,
             self.config.postgres_schema,
             self.config.outbound_queue_table,
+            self.config.postgres_schema,
+            self.config.ingest_event_table,
             self.config.postgres_schema,
             "middleware_dashboard_events",
         )
@@ -186,6 +226,13 @@ class PostgresStateStore:
     def _outbound_queue_index_name(self, suffix: str) -> str:
         """Build a safe outbound-queue index name."""
         raw_name = f"{self.config.outbound_queue_table}_{suffix}_idx"
+        if len(raw_name) > 60:
+            raw_name = raw_name[:60]
+        return _quote_identifier(raw_name)
+
+    def _ingest_event_index_name(self, suffix: str) -> str:
+        """Build a safe ingest-event index name."""
+        raw_name = f"{self.config.ingest_event_table}_{suffix}_idx"
         if len(raw_name) > 60:
             raw_name = raw_name[:60]
         return _quote_identifier(raw_name)
@@ -396,6 +443,213 @@ class PostgresStateStore:
                     ),
                 )
 
+    def append_ingest_events(self, records: list[dict[str, Any]]) -> None:
+        """Persist raw ingested events before downstream processing."""
+        if not records:
+            return
+
+        serialized_records = []
+        for record in records:
+            event_id = str(record.get("event_id") or "")
+            source = str(record.get("source") or "")
+            source_id = str(record.get("source_id") or "")
+            event_timestamp = str(record.get("event_timestamp") or "")
+            severity = str(record.get("severity") or "info")
+            if not event_id or not source or not source_id or not event_timestamp:
+                raise ValueError("ingest events require event_id, source, source_id, and event_timestamp")
+
+            serialized_records.append(
+                (
+                    event_id,
+                    source,
+                    source_id,
+                    event_timestamp,
+                    severity,
+                    record.get("rule_id"),
+                    record.get("host"),
+                    record.get("srcip"),
+                    record.get("found_by"),
+                    record.get("endpoint_url"),
+                    json.dumps(record.get("raw_payload", {}), sort_keys=True),
+                    json.dumps(record.get("finding_payload", {}), sort_keys=True),
+                    str(record.get("status") or "pending"),
+                )
+            )
+
+        with self._conn:
+            with self._conn.cursor() as cur:
+                cur.executemany(
+                    f"""
+                    INSERT INTO {self._schema}.{self._ingest_event_table}
+                    (
+                        event_id,
+                        source,
+                        source_id,
+                        event_timestamp,
+                        severity,
+                        rule_id,
+                        host,
+                        srcip,
+                        found_by,
+                        endpoint_url,
+                        raw_payload,
+                        finding_payload,
+                        status,
+                        created_at,
+                        updated_at
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                    ON CONFLICT (event_id) DO UPDATE SET
+                        source = EXCLUDED.source,
+                        source_id = EXCLUDED.source_id,
+                        event_timestamp = EXCLUDED.event_timestamp,
+                        severity = EXCLUDED.severity,
+                        rule_id = EXCLUDED.rule_id,
+                        host = EXCLUDED.host,
+                        srcip = EXCLUDED.srcip,
+                        found_by = EXCLUDED.found_by,
+                        endpoint_url = EXCLUDED.endpoint_url,
+                        raw_payload = EXCLUDED.raw_payload,
+                        finding_payload = EXCLUDED.finding_payload,
+                        status = EXCLUDED.status,
+                        updated_at = NOW()
+                    """,
+                    serialized_records,
+                )
+
+    def claim_ingest_events(
+        self,
+        worker_id: str,
+        limit: int = 100,
+        event_ids: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Claim a batch of pending ingest events for normalization/decision processing."""
+        safe_limit = max(1, int(limit))
+        filtered_ids = list(dict.fromkeys(event_ids or []))
+        where_clause = "status = 'pending'"
+        params: list[Any] = []
+        if filtered_ids:
+            where_clause += " AND event_id = ANY(%s)"
+            params.append(filtered_ids)
+        params.extend([safe_limit, worker_id])
+        with self._conn:
+            with self._conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    WITH claimable AS (
+                        SELECT event_id
+                        FROM {self._schema}.{self._ingest_event_table}
+                        WHERE {where_clause}
+                        ORDER BY created_at ASC
+                        LIMIT %s
+                        FOR UPDATE SKIP LOCKED
+                    )
+                    UPDATE {self._schema}.{self._ingest_event_table} AS events
+                    SET
+                        status = 'processing',
+                        locked_at = NOW(),
+                        locked_by = %s,
+                        updated_at = NOW()
+                    FROM claimable
+                    WHERE events.event_id = claimable.event_id
+                    RETURNING
+                        events.event_id,
+                        events.source,
+                        events.source_id,
+                        events.event_timestamp,
+                        events.severity,
+                        events.rule_id,
+                        events.host,
+                        events.srcip,
+                        events.found_by,
+                        events.endpoint_url,
+                        events.raw_payload,
+                        events.finding_payload
+                    """,
+                    tuple(params),
+                )
+                rows = cur.fetchall()
+
+        claimed: list[dict[str, Any]] = []
+        for row in rows:
+            raw_payload = row[10]
+            finding_payload = row[11]
+            claimed.append(
+                {
+                    "event_id": row[0],
+                    "source": row[1],
+                    "source_id": row[2],
+                    "event_timestamp": row[3],
+                    "severity": row[4],
+                    "rule_id": row[5],
+                    "host": row[6],
+                    "srcip": row[7],
+                    "found_by": row[8],
+                    "endpoint_url": row[9],
+                    "raw_payload": json.loads(raw_payload) if isinstance(raw_payload, str) else dict(raw_payload or {}),
+                    "finding_payload": json.loads(finding_payload) if isinstance(finding_payload, str) else dict(finding_payload or {}),
+                }
+            )
+        return claimed
+
+    def mark_ingest_events_processed(self, event_ids: list[str]) -> None:
+        """Mark claimed ingest events as fully processed."""
+        if not event_ids:
+            return
+        with self._conn:
+            with self._conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    UPDATE {self._schema}.{self._ingest_event_table}
+                    SET
+                        status = 'processed',
+                        processed_at = NOW(),
+                        locked_at = NULL,
+                        locked_by = NULL,
+                        last_error = NULL,
+                        updated_at = NOW()
+                    WHERE event_id = ANY(%s)
+                    """,
+                    (list(dict.fromkeys(event_ids)),),
+                )
+
+    def mark_ingest_events_pending(self, event_ids: list[str], last_error: str | None = None) -> None:
+        """Return claimed ingest events to pending state after a transient failure."""
+        if not event_ids:
+            return
+        with self._conn:
+            with self._conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    UPDATE {self._schema}.{self._ingest_event_table}
+                    SET
+                        status = 'pending',
+                        locked_at = NULL,
+                        locked_by = NULL,
+                        last_error = %s,
+                        updated_at = NOW()
+                    WHERE event_id = ANY(%s)
+                    """,
+                    (last_error, list(dict.fromkeys(event_ids))),
+                )
+
+    def get_ingest_event_stats(self) -> dict[str, int]:
+        """Return counts grouped by ingest-event status."""
+        with self._conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT status, COUNT(*)
+                FROM {self._schema}.{self._ingest_event_table}
+                GROUP BY status
+                """
+            )
+            rows = cur.fetchall()
+
+        stats = {"pending": 0, "processing": 0, "processed": 0}
+        for status, count in rows:
+            stats[str(status)] = int(count)
+        return stats
+
     def get_ticket_state(self, dedup_hash: str) -> dict[str, Any] | None:
         """Return the cached ticket state for one dedup hash."""
         if not dedup_hash:
@@ -491,6 +745,17 @@ class PostgresStateStore:
                         updated_at = NOW()
                     """,
                     (job_id, dedup_hash, action, status, serialized, next_attempt_at),
+                )
+
+    def delete_outbound_jobs(self, job_ids: list[str]) -> None:
+        """Delete queued outbound jobs, typically to roll back a partial enqueue failure."""
+        if not job_ids:
+            return
+        with self._conn:
+            with self._conn.cursor() as cur:
+                cur.execute(
+                    f"DELETE FROM {self._schema}.{self._outbound_queue_table} WHERE job_id = ANY(%s)",
+                    (list(dict.fromkeys(job_ids)),),
                 )
 
     def claim_outbound_jobs(self, worker_id: str, limit: int = 10) -> list[dict[str, Any]]:

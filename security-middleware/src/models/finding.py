@@ -150,9 +150,16 @@ class Finding:
             "timestamp": self.timestamp.isoformat(),
             "rule_id": self.rule_id,
             "rule_groups": self.rule_groups,
+            "raw_data": self.raw_data,
             "enrichment": self.enrichment,
             "dedup_key": self.dedup_key,
             "dedup_hash": self.dedup_hash,
+            "filtered": self.filtered,
+            "occurrence_count": self.occurrence_count,
+            "dedup_reason": self.dedup_reason,
+            "redmine_issue_id": self.redmine_issue_id,
+            "issue_state": self.issue_state,
+            "action": self.action,
         }
 
     @classmethod

@@ -100,6 +100,7 @@ def test_storage_config_builds_postgres_backend():
             "checkpoint_table": "checkpoints",
             "ticket_state_table": "ticket_state",
             "outbound_queue_table": "outbound_jobs",
+            "ingest_event_table": "ingest_events",
         }
     })
 
@@ -110,6 +111,7 @@ def test_storage_config_builds_postgres_backend():
     assert config.storage.checkpoint_table == "checkpoints"
     assert config.storage.ticket_state_table == "ticket_state"
     assert config.storage.outbound_queue_table == "outbound_jobs"
+    assert config.storage.ingest_event_table == "ingest_events"
 
 
 def test_pipeline_delivery_config_builds_async_worker_settings():

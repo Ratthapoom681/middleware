@@ -323,6 +323,7 @@ class StorageConfig:
     checkpoint_table: str = "middleware_checkpoints"
     ticket_state_table: str = "middleware_ticket_state"
     outbound_queue_table: str = "middleware_outbound_queue"
+    ingest_event_table: str = "middleware_ingest_events"
 
     def __post_init__(self) -> None:
         self.backend = str(self.backend or "local").strip().lower() or "local"
@@ -335,6 +336,7 @@ class StorageConfig:
         self.checkpoint_table = str(self.checkpoint_table or "middleware_checkpoints").strip() or "middleware_checkpoints"
         self.ticket_state_table = str(self.ticket_state_table or "middleware_ticket_state").strip() or "middleware_ticket_state"
         self.outbound_queue_table = str(self.outbound_queue_table or "middleware_outbound_queue").strip() or "middleware_outbound_queue"
+        self.ingest_event_table = str(self.ingest_event_table or "middleware_ingest_events").strip() or "middleware_ingest_events"
 
 
 @dataclass
