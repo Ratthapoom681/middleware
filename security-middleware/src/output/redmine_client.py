@@ -97,7 +97,7 @@ class RedmineClient:
             "issue": {
                 "project_id": self.config.project_id,
                 "tracker_id": tracker_id,
-                "subject": f"[{finding.severity.value.upper()}] {finding.title}"[:255],
+                "subject": subject,
                 "description": description,
                 "priority_id": finding.enrichment.get(
                     "redmine_priority_id",

@@ -6,6 +6,13 @@ A Python middleware service that ingests security findings from **Wazuh SIEM** a
 
 ---
 
+## Engineering Docs
+
+- [Implementation Plan](C:/Users/ifilm/Downloads/Document/security-middleware/IMPLEMENTATION_PLAN.md)
+- [Frontend Developer README](C:/Users/ifilm/Downloads/Document/security-middleware/web/FRONTEND_README.md)
+
+---
+
 ## Architecture
 
 ```
@@ -79,6 +86,9 @@ python -m src.main
 
 # Single cycle (useful for cron)
 python -m src.main --once
+
+# Run the Redmine delivery worker for queued jobs
+python -m src.main --delivery-worker
 
 # Test connections only
 python -m src.main --test
@@ -268,11 +278,23 @@ storage:
   postgres_schema: "middleware"
   dedup_table: "middleware_seen_hashes"
   checkpoint_table: "middleware_checkpoints"
+  ticket_state_table: "middleware_ticket_state"
+  outbound_queue_table: "middleware_outbound_queue"
+
+pipeline:
+  delivery:
+    async_enabled: false
+    worker_poll_interval: 10
+    worker_batch_size: 25
+    retry_delay_seconds: 60
+    recheck_ttl_minutes: 15
+    store_first_ingest: false
 ```
 
 When `storage.backend` is set to `postgres`:
 - dedup state moves from local SQLite into Postgres
 - DefectDojo incremental checkpoints move from local JSON files into Postgres
+- ticket-state cache and outbound queue can use the same shared Postgres schema
 - multiple middleware instances can share the same state safely
 
 ---

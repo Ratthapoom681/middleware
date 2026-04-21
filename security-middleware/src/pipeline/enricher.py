@@ -17,7 +17,7 @@ from typing import Any, Optional
 import yaml
 
 from src.config import EnrichmentConfig
-from src.models.finding import Finding, Severity
+from src.models.finding import Finding, FindingSource, Severity
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +128,12 @@ class EnricherStage:
         """
         Build a rich Redmine-compatible description (Textile format).
         """
+        if finding.source == FindingSource.WAZUH:
+            return self._format_wazuh_redmine_description(finding)
+        return self._format_default_redmine_description(finding)
+
+    def _format_default_redmine_description(self, finding: Finding) -> str:
+        """Build the default Redmine description for non-Wazuh findings."""
         parts: list[str] = []
 
         # Header
@@ -176,4 +182,100 @@ class EnricherStage:
         parts.append(f"---")
         parts.append(f"_Dedup Hash: @{finding.dedup_hash}@_")
 
+        return "\n".join(parts)
+
+    def _format_wazuh_redmine_description(self, finding: Finding) -> str:
+        """Build a Wazuh-focused Redmine description that surfaces the key signal quickly."""
+        parts: list[str] = []
+        alert = finding.raw_data or {}
+        rule = alert.get("rule", {}) if isinstance(alert, dict) else {}
+        agent = alert.get("agent", {}) if isinstance(alert, dict) else {}
+        manager = alert.get("manager", {}) if isinstance(alert, dict) else {}
+        data = alert.get("data", {}) if isinstance(alert, dict) else {}
+
+        def add_row(label: str, value: Any) -> None:
+            if value in (None, "", [], {}):
+                return
+            parts.append(f"|_. {label}|{value}|")
+
+        def first_non_empty(*values: Any) -> str:
+            for value in values:
+                if value not in (None, ""):
+                    return str(value)
+            return ""
+
+        parts.append(f"h2. {finding.enrichment.get('severity_label', finding.severity.value.upper())}")
+        parts.append("")
+
+        parts.append("h3. Alert Summary")
+        parts.append("")
+        add_row("Title", finding.title)
+        add_row("Source", finding.source.value.upper())
+        add_row("Rule ID", finding.rule_id or rule.get("id"))
+        add_row("Rule Level", first_non_empty(rule.get("level"), finding.raw_severity))
+        add_row("Agent", first_non_empty(agent.get("name"), finding.host))
+        add_row("Manager", manager.get("name"))
+        add_row("Device", first_non_empty(data.get("devname"), data.get("devid"), finding.routing_key))
+        add_row("Severity", finding.severity.value.upper())
+        add_row("Timestamp", finding.timestamp.strftime('%Y-%m-%d %H:%M:%S UTC'))
+        parts.append("")
+
+        parts.append("h3. What Happened")
+        parts.append("")
+        parts.append(rule.get("description") or finding.title)
+        parts.append("")
+
+        message = first_non_empty(data.get("msg"), alert.get("full_log"))
+        if message:
+            parts.append("h3. Primary Evidence")
+            parts.append("")
+            parts.append(f"<pre>{message}</pre>")
+            parts.append("")
+
+        parts.append("h3. Network Context")
+        parts.append("")
+        add_row("Source IP", first_non_empty(data.get("srcip"), finding.srcip))
+        add_row("Source Country", data.get("srccountry"))
+        add_row("Source Port", data.get("srcport"))
+        add_row("Destination IP", data.get("dstip"))
+        add_row("Destination Country", data.get("dstcountry"))
+        add_row("Destination Port", data.get("dstport"))
+        add_row("Protocol", first_non_empty(data.get("proto"), data.get("protocol")))
+        add_row("Service", data.get("service"))
+        add_row("Action", data.get("action"))
+        parts.append("")
+
+        parts.append("h3. Detection Context")
+        parts.append("")
+        add_row("Decoder", alert.get("decoder", {}).get("name") if isinstance(alert.get("decoder"), dict) else "")
+        add_row("Groups", ", ".join(finding.rule_groups) if finding.rule_groups else "")
+        add_row("Attack", data.get("attack"))
+        add_row("Attack ID", data.get("attackid"))
+        add_row("Count", data.get("count"))
+        add_row("Policy ID", data.get("policyid"))
+        add_row("Policy Type", data.get("policytype"))
+        add_row("Event Type", data.get("eventtype"))
+        add_row("Log ID", data.get("logid"))
+        add_row("Location", alert.get("location"))
+        parts.append("")
+
+        asset_info = finding.enrichment.get("asset")
+        if asset_info:
+            parts.append("h3. Asset Information")
+            parts.append("")
+            for key, value in asset_info.items():
+                if key != "aliases":
+                    add_row(key.replace("_", " ").title(), value)
+            parts.append("")
+
+        links = finding.enrichment.get("remediation_links", [])
+        if links:
+            parts.append("h3. References")
+            parts.append("")
+            for link in links:
+                parts.append(f"* {link}")
+            parts.append("")
+
+        parts.append("---")
+        parts.append(f"_Dedup Hash: @{finding.dedup_hash}@_")
         return "\n".join(parts)

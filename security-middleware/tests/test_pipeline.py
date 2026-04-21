@@ -14,9 +14,12 @@ from src.config import (
     PipelineConfig,
     FilterConfig,
     DedupConfig,
+    DeliveryConfig,
     EnrichmentConfig,
 )
 from src.main import MiddlewarePipeline
+from src.models.finding import Finding, FindingSource, Severity
+from src.pipeline.identity import hydrate_identity
 
 
 @pytest.fixture
@@ -194,4 +197,53 @@ def test_full_pipeline_cycle(config, workspace_tmp_dir, monkeypatch):
     assert history[0]["stats"]["ingested"] == 3
 
     # Cleanup
+    pipeline.close()
+
+
+class _FakeQueueStateStore:
+    def __init__(self):
+        self.jobs = []
+        self.ticket_states = []
+        self.closed = False
+
+    def enqueue_outbound_job(self, **kwargs):
+        self.jobs.append(kwargs)
+
+    def save_ticket_state(self, dedup_hash, **kwargs):
+        self.ticket_states.append((dedup_hash, kwargs))
+
+    def close(self):
+        self.closed = True
+
+
+def test_process_batch_queues_wazuh_findings_when_async_delivery_enabled(config):
+    config.pipeline.delivery = DeliveryConfig(async_enabled=True, worker_batch_size=10)
+    pipeline = MiddlewarePipeline(config)
+    pipeline.state_store = _FakeQueueStateStore()
+    pipeline.config.pipeline.delivery.async_enabled = True
+
+    finding = hydrate_identity(
+        Finding(
+            source=FindingSource.WAZUH,
+            source_id="alert-queue-1",
+            title="SSH brute force attempt",
+            description="SSH brute force attempt detected",
+            severity=Severity.HIGH,
+            raw_severity="10",
+            host="web-server-01",
+            routing_key="web-server-01",
+            rule_id="5710",
+            rule_groups=["sshd", "authentication"],
+            raw_data={"rule": {"id": "5710", "description": "SSH brute force attempt"}},
+        )
+    )
+
+    outcome = pipeline.process_batch([finding])
+
+    assert outcome["stats"]["queued"] == 1
+    assert outcome["stats"]["created"] == 0
+    assert pipeline.state_store.jobs[0]["action"] == "create_ticket"
+    assert pipeline.state_store.jobs[0]["dedup_hash"] == finding.dedup_hash
+    assert pipeline.state_store.ticket_states[0][1]["last_delivery_status"] == "queued"
+
     pipeline.close()

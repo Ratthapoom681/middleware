@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional
 
@@ -154,6 +154,57 @@ class Finding:
             "dedup_key": self.dedup_key,
             "dedup_hash": self.dedup_hash,
         }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Finding":
+        """Rehydrate a serialized finding from queue or storage payloads."""
+        timestamp_raw = data.get("timestamp")
+        if isinstance(timestamp_raw, datetime):
+            timestamp = timestamp_raw
+        elif timestamp_raw:
+            try:
+                timestamp = datetime.fromisoformat(str(timestamp_raw).replace("Z", "+00:00"))
+            except ValueError:
+                timestamp = datetime.now(timezone.utc)
+        else:
+            timestamp = datetime.now(timezone.utc)
+
+        finding = cls(
+            source=FindingSource(str(data.get("source", FindingSource.WAZUH.value)).strip().lower()),
+            source_id=str(data.get("source_id", "")),
+            title=str(data.get("title", "")),
+            description=str(data.get("description", "")),
+            severity=Severity.from_string(str(data.get("severity", Severity.INFO.value))),
+            raw_severity=str(data.get("raw_severity", "")),
+            host=str(data.get("host", "")),
+            srcip=str(data.get("srcip", "")),
+            endpoints=[str(item) for item in data.get("endpoints", []) or []],
+            endpoint_url=str(data.get("endpoint_url", "")),
+            component=str(data.get("component", "")),
+            component_version=str(data.get("component_version", "")),
+            plugin_id=str(data.get("plugin_id", "")),
+            found_by=str(data.get("found_by", "")),
+            cwe=str(data.get("cwe", "")),
+            param=str(data.get("param", "")),
+            routing_key=str(data.get("routing_key", "")),
+            cvss=data.get("cvss"),
+            cve_ids=[str(item) for item in data.get("cve_ids", []) or []],
+            tags=[str(item) for item in data.get("tags", []) or []],
+            timestamp=timestamp,
+            rule_id=str(data.get("rule_id")) if data.get("rule_id") is not None else None,
+            rule_groups=[str(item) for item in data.get("rule_groups", []) or []],
+            raw_data=dict(data.get("raw_data", {}) or {}),
+            enrichment=dict(data.get("enrichment", {}) or {}),
+        )
+        finding.dedup_key = str(data.get("dedup_key", "")) or finding.dedup_key
+        finding.dedup_hash = str(data.get("dedup_hash", "")) or finding.dedup_hash
+        finding.filtered = bool(data.get("filtered", False))
+        finding.occurrence_count = int(data.get("occurrence_count", 1) or 1)
+        finding.dedup_reason = data.get("dedup_reason")
+        finding.redmine_issue_id = data.get("redmine_issue_id")
+        finding.issue_state = str(data.get("issue_state", "open") or "open")
+        finding.action = data.get("action")
+        return finding
 
     def to_json(self) -> str:
         """Serialize finding to JSON string."""

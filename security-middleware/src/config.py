@@ -297,12 +297,32 @@ class DedupConfig:
 
 
 @dataclass
+class DeliveryConfig:
+    async_enabled: bool = False
+    worker_poll_interval: int = 10
+    worker_batch_size: int = 25
+    retry_delay_seconds: int = 60
+    recheck_ttl_minutes: int = 15
+    store_first_ingest: bool = False
+
+    def __post_init__(self) -> None:
+        self.async_enabled = _normalize_bool(self.async_enabled, False)
+        self.worker_poll_interval = max(1, _normalize_int(self.worker_poll_interval, 10))
+        self.worker_batch_size = max(1, _normalize_int(self.worker_batch_size, 25))
+        self.retry_delay_seconds = max(1, _normalize_int(self.retry_delay_seconds, 60))
+        self.recheck_ttl_minutes = max(1, _normalize_int(self.recheck_ttl_minutes, 15))
+        self.store_first_ingest = _normalize_bool(self.store_first_ingest, False)
+
+
+@dataclass
 class StorageConfig:
     backend: str = "local"  # local or postgres
     postgres_dsn: str = ""
     postgres_schema: str = "public"
     dedup_table: str = "middleware_seen_hashes"
     checkpoint_table: str = "middleware_checkpoints"
+    ticket_state_table: str = "middleware_ticket_state"
+    outbound_queue_table: str = "middleware_outbound_queue"
 
     def __post_init__(self) -> None:
         self.backend = str(self.backend or "local").strip().lower() or "local"
@@ -313,6 +333,8 @@ class StorageConfig:
         self.postgres_schema = str(self.postgres_schema or "public").strip() or "public"
         self.dedup_table = str(self.dedup_table or "middleware_seen_hashes").strip() or "middleware_seen_hashes"
         self.checkpoint_table = str(self.checkpoint_table or "middleware_checkpoints").strip() or "middleware_checkpoints"
+        self.ticket_state_table = str(self.ticket_state_table or "middleware_ticket_state").strip() or "middleware_ticket_state"
+        self.outbound_queue_table = str(self.outbound_queue_table or "middleware_outbound_queue").strip() or "middleware_outbound_queue"
 
 
 @dataclass
@@ -328,6 +350,7 @@ class PipelineConfig:
     initial_lookback_minutes: int = 1440  # how far back to look on first poll (default 24h)
     filter: FilterConfig = field(default_factory=FilterConfig)
     dedup: DedupConfig = field(default_factory=DedupConfig)
+    delivery: DeliveryConfig = field(default_factory=DeliveryConfig)
     enrichment: EnrichmentConfig = field(default_factory=EnrichmentConfig)
 
 
@@ -420,6 +443,7 @@ def _build_config(raw: dict[str, Any]) -> AppConfig:
         initial_lookback_minutes=pipeline_raw.get("initial_lookback_minutes", 1440),
         filter=FilterConfig(**pipeline_raw.get("filter", {})),
         dedup=DedupConfig(**pipeline_raw.get("dedup", {})),
+        delivery=DeliveryConfig(**pipeline_raw.get("delivery", {})),
         enrichment=EnrichmentConfig(**pipeline_raw.get("enrichment", {})),
     )
     storage = StorageConfig(**normalized_raw.get("storage", {}))

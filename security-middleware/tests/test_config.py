@@ -98,6 +98,8 @@ def test_storage_config_builds_postgres_backend():
             "postgres_schema": "middleware",
             "dedup_table": "seen_hashes",
             "checkpoint_table": "checkpoints",
+            "ticket_state_table": "ticket_state",
+            "outbound_queue_table": "outbound_jobs",
         }
     })
 
@@ -106,6 +108,30 @@ def test_storage_config_builds_postgres_backend():
     assert config.storage.postgres_schema == "middleware"
     assert config.storage.dedup_table == "seen_hashes"
     assert config.storage.checkpoint_table == "checkpoints"
+    assert config.storage.ticket_state_table == "ticket_state"
+    assert config.storage.outbound_queue_table == "outbound_jobs"
+
+
+def test_pipeline_delivery_config_builds_async_worker_settings():
+    config = _build_config({
+        "pipeline": {
+            "delivery": {
+                "async_enabled": "true",
+                "worker_poll_interval": "5",
+                "worker_batch_size": "12",
+                "retry_delay_seconds": "90",
+                "recheck_ttl_minutes": "30",
+                "store_first_ingest": "true",
+            }
+        }
+    })
+
+    assert config.pipeline.delivery.async_enabled is True
+    assert config.pipeline.delivery.worker_poll_interval == 5
+    assert config.pipeline.delivery.worker_batch_size == 12
+    assert config.pipeline.delivery.retry_delay_seconds == 90
+    assert config.pipeline.delivery.recheck_ttl_minutes == 30
+    assert config.pipeline.delivery.store_first_ingest is True
 
 
 def test_load_config_resolves_relative_paths_from_project_root(workspace_tmp_dir, monkeypatch):
