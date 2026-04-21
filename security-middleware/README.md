@@ -113,6 +113,8 @@ docker-compose logs -f middleware
 docker-compose run middleware --once
 ```
 
+The bundled `docker-compose.yml` starts a local PostgreSQL container too. Because the middleware service runs with `network_mode: host`, use `127.0.0.1:5432` in `config/config.yaml` when you want the middleware to use that local Postgres instance.
+
 ### 5. Quick Start — Amazon Linux (EC2)
 
 Step-by-step deployment on **Amazon Linux 2023** or **Amazon Linux 2** running on EC2.
@@ -277,7 +279,7 @@ pipeline:
 ```yaml
 storage:
   backend: "postgres"              # local or postgres
-  postgres_dsn: "postgresql://middleware:secret@db/security"
+  postgres_dsn: "postgresql://middleware:middleware@127.0.0.1:5432/security"
   postgres_schema: "middleware"
   dedup_table: "middleware_seen_hashes"
   checkpoint_table: "middleware_checkpoints"
@@ -300,6 +302,7 @@ When `storage.backend` is set to `postgres`:
 - DefectDojo incremental checkpoints move from local JSON files into Postgres
 - ticket-state cache, ingest-event staging, and outbound queue can use the same shared Postgres schema
 - multiple middleware instances can share the same state safely
+- in the default `docker-compose.yml`, use `127.0.0.1:5432` for `postgres_dsn` because the middleware container uses host networking
 
 When `pipeline.delivery.store_first_ingest` is enabled:
 - raw Wazuh and DefectDojo payloads are persisted into `storage.ingest_event_table` before filter/dedup/enrich runs
