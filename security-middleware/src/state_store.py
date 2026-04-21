@@ -44,9 +44,31 @@ class PostgresStateStore:
         self._conn = self._dbapi.connect(config.postgres_dsn)
         self._init_db()
 
+    def _commit(self) -> None:
+        """Commit the current transaction without closing the shared connection."""
+        commit = getattr(self._conn, "commit", None)
+        if callable(commit):
+            commit()
+
+    def _rollback(self) -> None:
+        """Rollback the current transaction without closing the shared connection."""
+        rollback = getattr(self._conn, "rollback", None)
+        if callable(rollback):
+            rollback()
+
+    def _run_write(self, operation):
+        """Run one write operation and keep the shared connection open afterward."""
+        try:
+            result = operation()
+        except Exception:
+            self._rollback()
+            raise
+        self._commit()
+        return result
+
     def _init_db(self) -> None:
         """Initialize the shared Postgres schema and tables."""
-        with self._conn:
+        def operation() -> None:
             with self._conn.cursor() as cur:
                 cur.execute(f"CREATE SCHEMA IF NOT EXISTS {self._schema}")
                 cur.execute(
@@ -186,6 +208,7 @@ class PostgresStateStore:
                     ON {self._schema}.{self._dashboard_table} (receive_time DESC)
                     """
                 )
+        self._run_write(operation)
         logger.info(
             "Postgres state store initialized (%s.%s / %s.%s / %s.%s / %s.%s / %s.%s / %s.%s)",
             self.config.postgres_schema,
@@ -274,7 +297,7 @@ class PostgresStateStore:
         if not records:
             return
 
-        with self._conn:
+        def operation() -> None:
             with self._conn.cursor() as cur:
                 cur.executemany(
                     f"""
@@ -293,13 +316,14 @@ class PostgresStateStore:
                     """,
                     records,
                 )
+        self._run_write(operation)
 
     def commit_updates(self, records: list[tuple[Any, ...]]) -> None:
         """Persist repeat-finding issue mappings and lifecycle state."""
         if not records:
             return
 
-        with self._conn:
+        def operation() -> None:
             with self._conn.cursor() as cur:
                 cur.executemany(
                     f"""
@@ -314,16 +338,18 @@ class PostgresStateStore:
                     """,
                     records,
                 )
+        self._run_write(operation)
 
     def cleanup_dedup(self, cutoff: float) -> int:
         """Purge expired dedup entries and return the deleted row count."""
-        with self._conn:
+        def operation() -> int:
             with self._conn.cursor() as cur:
                 cur.execute(
                     f"DELETE FROM {self._schema}.{self._dedup_table} WHERE last_seen < %s",
                     (cutoff,),
                 )
                 return cur.rowcount or 0
+        return self._run_write(operation)
 
     def get_dedup_stats(self) -> dict[str, int]:
         """Return simple dedup storage statistics."""
@@ -360,7 +386,7 @@ class PostgresStateStore:
     def save_checkpoint(self, checkpoint_key: str, signature: str, payload: dict[str, Any]) -> None:
         """Persist the latest checkpoint state."""
         serialized = json.dumps(payload, sort_keys=True)
-        with self._conn:
+        def operation() -> None:
             with self._conn.cursor() as cur:
                 cur.execute(
                     f"""
@@ -374,6 +400,7 @@ class PostgresStateStore:
                     """,
                     (checkpoint_key, signature, serialized),
                 )
+        self._run_write(operation)
 
     def save_ticket_state(
         self,
@@ -395,7 +422,7 @@ class PostgresStateStore:
             raise ValueError("ticket state requires a non-empty dedup_hash")
 
         serialized = json.dumps(payload or {}, sort_keys=True)
-        with self._conn:
+        def operation() -> None:
             with self._conn.cursor() as cur:
                 cur.execute(
                     f"""
@@ -442,6 +469,7 @@ class PostgresStateStore:
                         serialized,
                     ),
                 )
+        self._run_write(operation)
 
     def append_ingest_events(self, records: list[dict[str, Any]]) -> None:
         """Persist raw ingested events before downstream processing."""
@@ -476,7 +504,7 @@ class PostgresStateStore:
                 )
             )
 
-        with self._conn:
+        def operation() -> None:
             with self._conn.cursor() as cur:
                 cur.executemany(
                     f"""
@@ -516,6 +544,7 @@ class PostgresStateStore:
                     """,
                     serialized_records,
                 )
+        self._run_write(operation)
 
     def claim_ingest_events(
         self,
@@ -532,7 +561,7 @@ class PostgresStateStore:
             where_clause += " AND event_id = ANY(%s)"
             params.append(filtered_ids)
         params.extend([safe_limit, worker_id])
-        with self._conn:
+        def operation() -> list[tuple[Any, ...]]:
             with self._conn.cursor() as cur:
                 cur.execute(
                     f"""
@@ -568,7 +597,8 @@ class PostgresStateStore:
                     """,
                     tuple(params),
                 )
-                rows = cur.fetchall()
+                return cur.fetchall()
+        rows = self._run_write(operation)
 
         claimed: list[dict[str, Any]] = []
         for row in rows:
@@ -596,7 +626,7 @@ class PostgresStateStore:
         """Mark claimed ingest events as fully processed."""
         if not event_ids:
             return
-        with self._conn:
+        def operation() -> None:
             with self._conn.cursor() as cur:
                 cur.execute(
                     f"""
@@ -612,12 +642,13 @@ class PostgresStateStore:
                     """,
                     (list(dict.fromkeys(event_ids)),),
                 )
+        self._run_write(operation)
 
     def mark_ingest_events_pending(self, event_ids: list[str], last_error: str | None = None) -> None:
         """Return claimed ingest events to pending state after a transient failure."""
         if not event_ids:
             return
-        with self._conn:
+        def operation() -> None:
             with self._conn.cursor() as cur:
                 cur.execute(
                     f"""
@@ -632,6 +663,7 @@ class PostgresStateStore:
                     """,
                     (last_error, list(dict.fromkeys(event_ids))),
                 )
+        self._run_write(operation)
 
     def get_ingest_event_stats(self) -> dict[str, int]:
         """Return counts grouped by ingest-event status."""
@@ -709,7 +741,7 @@ class PostgresStateStore:
             raise ValueError("outbound queue jobs require job_id, dedup_hash, and action")
 
         serialized = json.dumps(payload or {}, sort_keys=True)
-        with self._conn:
+        def operation() -> None:
             with self._conn.cursor() as cur:
                 cur.execute(
                     f"""
@@ -746,22 +778,24 @@ class PostgresStateStore:
                     """,
                     (job_id, dedup_hash, action, status, serialized, next_attempt_at),
                 )
+        self._run_write(operation)
 
     def delete_outbound_jobs(self, job_ids: list[str]) -> None:
         """Delete queued outbound jobs, typically to roll back a partial enqueue failure."""
         if not job_ids:
             return
-        with self._conn:
+        def operation() -> None:
             with self._conn.cursor() as cur:
                 cur.execute(
                     f"DELETE FROM {self._schema}.{self._outbound_queue_table} WHERE job_id = ANY(%s)",
                     (list(dict.fromkeys(job_ids)),),
                 )
+        self._run_write(operation)
 
     def claim_outbound_jobs(self, worker_id: str, limit: int = 10) -> list[dict[str, Any]]:
         """Claim a batch of ready outbound jobs for one worker."""
         safe_limit = max(1, int(limit))
-        with self._conn:
+        def operation() -> list[tuple[Any, ...]]:
             with self._conn.cursor() as cur:
                 cur.execute(
                     f"""
@@ -794,7 +828,8 @@ class PostgresStateStore:
                     """,
                     (safe_limit, worker_id),
                 )
-                rows = cur.fetchall()
+                return cur.fetchall()
+        rows = self._run_write(operation)
 
         claimed: list[dict[str, Any]] = []
         for row in rows:
@@ -815,7 +850,7 @@ class PostgresStateStore:
 
     def mark_outbound_job_succeeded(self, job_id: str) -> None:
         """Mark one outbound queue job as successfully delivered."""
-        with self._conn:
+        def operation() -> None:
             with self._conn.cursor() as cur:
                 cur.execute(
                     f"""
@@ -831,10 +866,11 @@ class PostgresStateStore:
                     """,
                     (job_id,),
                 )
+        self._run_write(operation)
 
     def mark_outbound_job_retry(self, job_id: str, last_error: str, next_attempt_at: str | None = None) -> None:
         """Reschedule one outbound queue job for retry."""
-        with self._conn:
+        def operation() -> None:
             with self._conn.cursor() as cur:
                 cur.execute(
                     f"""
@@ -851,10 +887,11 @@ class PostgresStateStore:
                     """,
                     (last_error, next_attempt_at, job_id),
                 )
+        self._run_write(operation)
 
     def mark_outbound_job_failed(self, job_id: str, last_error: str) -> None:
         """Mark one outbound queue job as permanently failed."""
-        with self._conn:
+        def operation() -> None:
             with self._conn.cursor() as cur:
                 cur.execute(
                     f"""
@@ -870,6 +907,7 @@ class PostgresStateStore:
                     """,
                     (last_error, job_id),
                 )
+        self._run_write(operation)
 
     def get_outbound_job_stats(self) -> dict[str, int]:
         """Return counts grouped by outbound queue status."""
@@ -902,7 +940,7 @@ class PostgresStateStore:
             raise ValueError("Dashboard event record requires 'id' and 'receive_time'")
 
         serialized = json.dumps(record, sort_keys=True)
-        with self._conn:
+        def operation() -> None:
             with self._conn.cursor() as cur:
                 cur.execute(
                     f"""
@@ -915,6 +953,7 @@ class PostgresStateStore:
                     """,
                     (event_id, receive_time, serialized),
                 )
+        self._run_write(operation)
 
     def get_dashboard_history(self, limit: int = 200) -> list[dict[str, Any]]:
         """Return the most recent persisted dashboard events, newest first."""
