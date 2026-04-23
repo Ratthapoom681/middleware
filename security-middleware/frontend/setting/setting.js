@@ -113,6 +113,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     loadSection('wazuh');
+    loadRetentionStatus();
+    loadBackups();
 });
 
 async function loadSection(section) {
@@ -213,6 +215,7 @@ async function doBackup() {
     try {
         const res = await API.triggerBackup();
         COMPONENTS.toast(`Backup created: ${res.backup_path}`, 'success');
+        loadBackups();
     } catch (e) {
         COMPONENTS.toast(`Backup failed: ${e.message}`, 'error');
     }
@@ -228,6 +231,67 @@ async function doCleanup() {
     }
 }
 
+function formatBytes(bytes) {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
+async function loadRetentionStatus() {
+    const el = document.getElementById('retention-status');
+    if (!el) return;
+    try {
+        const status = await API.getRetentionStatus();
+        el.innerHTML = `<i class="ph-bold ph-info"></i> Retention: <strong>${status.retention_days} days</strong> · Backup: <strong>${status.backup_enabled ? 'Enabled' : 'Disabled'}</strong>`;
+    } catch {
+        el.textContent = '';
+    }
+}
+
+async function loadBackups() {
+    const tbody = document.getElementById('backups-body');
+    if (!tbody) return;
+    tbody.innerHTML = '<tr><td colspan="4" class="loading-placeholder">Loading…</td></tr>';
+
+    const backups = await API.getBackups();
+    if (backups.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" class="loading-placeholder">No backups available</td></tr>';
+        return;
+    }
+    tbody.innerHTML = backups.map(b => `
+        <tr>
+            <td><code>${b.filename}</code></td>
+            <td>${formatBytes(b.size_bytes)}</td>
+            <td>${new Date(b.created_at).toLocaleString()}</td>
+            <td>
+                <button class="btn btn-sm btn-warning" onclick="restoreBackup('${b.filename}')">
+                    <i class="ph-bold ph-arrow-counter-clockwise"></i> Restore
+                </button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+async function restoreBackup(filename) {
+    if (!confirm(`Restore database from backup "${filename}"?\n\nThis will replace the current database. A safety backup will be created automatically.`)) return;
+    try {
+        const res = await API.restoreBackup(filename);
+        if (res.status === 'ok') {
+            COMPONENTS.toast(`Database restored from ${filename}`, 'success');
+            loadBackups();
+        } else {
+            COMPONENTS.toast(`Restore failed: ${res.message}`, 'error');
+        }
+    } catch (e) {
+        COMPONENTS.toast(`Restore failed: ${e.message}`, 'error');
+    }
+}
+
 window.saveCurrentSection = saveCurrentSection;
 window.doBackup = doBackup;
 window.doCleanup = doCleanup;
+window.loadBackups = loadBackups;
+window.restoreBackup = restoreBackup;
+

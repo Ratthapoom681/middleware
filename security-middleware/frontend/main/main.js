@@ -1,7 +1,19 @@
+/**
+ * Dashboard – Security Overview with real-time WebSocket updates.
+ */
+
 document.addEventListener('DOMContentLoaded', async () => {
     COMPONENTS.initLayout('dashboard', 'Security Overview');
     loadDashboardStats();
     loadRecentLogs();
+
+    // Real-time updates via WebSocket
+    API.connectWebSocket((data) => {
+        if (data.type === 'pipeline_run' || data.type === 'config_updated') {
+            loadDashboardStats();
+            loadRecentLogs();
+        }
+    });
 });
 
 async function loadDashboardStats() {

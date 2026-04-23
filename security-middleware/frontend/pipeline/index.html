@@ -15,7 +15,12 @@
                 <div class="card mb-md">
                     <div class="card-header">
                         <h3><i class="ph-bold ph-git-merge"></i> Pipeline Status</h3>
-                        <span class="badge badge-info" id="pipeline-status-badge">Checking…</span>
+                        <div style="display:flex;gap:0.5rem;align-items:center;">
+                            <button class="btn btn-primary" id="btn-run-now" onclick="triggerPipeline()">
+                                <i class="ph-bold ph-play"></i> Run Now
+                            </button>
+                            <span class="badge badge-info" id="pipeline-status-badge">Checking…</span>
+                        </div>
                     </div>
                     <div class="pipeline-stats">
                         <div class="card stat-card"><div class="stat-icon indigo"><i class="ph-bold ph-lightning"></i></div><div class="stat-info"><span class="stat-label">Processed</span><h3 class="stat-value" id="p-processed">0</h3></div></div>
@@ -24,7 +29,25 @@
                         <div class="card stat-card"><div class="stat-icon violet"><i class="ph-bold ph-paper-plane-tilt"></i></div><div class="stat-info"><span class="stat-label">Delivered</span><h3 class="stat-value" id="p-delivered">0</h3></div></div>
                         <div class="card stat-card"><div class="stat-icon rose"><i class="ph-bold ph-x-circle"></i></div><div class="stat-info"><span class="stat-label">Failed</span><h3 class="stat-value" id="p-failed">0</h3></div></div>
                     </div>
+                    <div class="pipeline-last-run" id="pipeline-last-run" style="padding:0 1.25rem 1rem;font-size:0.85rem;color:var(--text-muted)"></div>
                 </div>
+
+                <!-- Scheduled Jobs -->
+                <div class="card mb-md">
+                    <div class="card-header">
+                        <h3><i class="ph-bold ph-calendar-check"></i> Scheduled Jobs</h3>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table">
+                            <thead><tr><th>Job</th><th>Description</th><th>Status</th><th>Last Run</th><th>Action</th></tr></thead>
+                            <tbody id="jobs-body">
+                                <tr><td colspan="5" class="loading-placeholder">Loading…</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Dead-Letter Queue -->
                 <div class="card">
                     <div class="card-header"><h3>Dead-Letter Queue</h3></div>
                     <div class="table-responsive">

@@ -153,6 +153,61 @@ const API = {
     async triggerCleanup(days = 90) {
         return await this.request(`/data-retention/cleanup?retention_days=${days}`, { method: 'POST' });
     },
+    async getRetentionStatus() {
+        try { return await this.request('/data-retention/status'); }
+        catch { return { retention_days: 90, backup_enabled: true }; }
+    },
+    async getBackups() {
+        try {
+            const data = await this.request('/data-retention/backups');
+            return data.backups || [];
+        } catch { return []; }
+    },
+    async restoreBackup(filename) {
+        return await this.request(`/data-retention/backups/restore/${encodeURIComponent(filename)}`, { method: 'POST' });
+    },
+
+    // ── WebSocket ──
+    connectWebSocket(onMessage) {
+        const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${location.host}/api/logs/stream`;
+        let ws = null;
+        let reconnectTimer = null;
+
+        function connect() {
+            try {
+                ws = new WebSocket(wsUrl);
+                ws.onopen = () => console.log('[WS] Connected');
+                ws.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        if (onMessage) onMessage(data);
+                    } catch (e) {
+                        console.warn('[WS] Parse error:', e);
+                    }
+                };
+                ws.onclose = () => {
+                    console.log('[WS] Disconnected, reconnecting in 5s…');
+                    reconnectTimer = setTimeout(connect, 5000);
+                };
+                ws.onerror = (err) => {
+                    console.warn('[WS] Error:', err);
+                    ws.close();
+                };
+            } catch (e) {
+                console.warn('[WS] Connection failed:', e);
+                reconnectTimer = setTimeout(connect, 5000);
+            }
+        }
+
+        connect();
+        return {
+            close() {
+                clearTimeout(reconnectTimer);
+                if (ws) ws.close();
+            }
+        };
+    },
 };
 
 window.API = API;
