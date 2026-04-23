@@ -1,0 +1,112 @@
+[2026-04-23 11:56:31] INFO     middleware :: Starting Middleware server …
+[2026-04-23 11:56:31] INFO     middleware :: Database connected & tables ready
+[2026-04-23 11:56:31] INFO     middleware :: SettingsManager reloaded (10 sections)
+[2026-04-23 11:56:31] INFO     middleware :: Settings loaded into SettingsManager
+[2026-04-23 11:57:27] INFO     middleware :: SettingsManager reloaded (10 sections)
+[2026-04-23 11:57:27] INFO     middleware :: Settings section 'wazuh' updated and reloaded
+[2026-04-23 12:01:26] INFO     middleware :: Middleware server stopped
+[2026-04-23 12:01:28] INFO     middleware :: Starting Middleware server …
+[2026-04-23 12:01:28] INFO     middleware :: Database connected & tables ready
+[2026-04-23 12:01:28] INFO     middleware :: SettingsManager reloaded (10 sections)
+[2026-04-23 12:01:28] INFO     middleware :: Settings loaded into SettingsManager
+[2026-04-23 12:11:27] INFO     middleware :: Middleware server stopped
+[2026-04-23 12:11:28] INFO     middleware :: Starting Middleware server …
+[2026-04-23 12:11:28] INFO     middleware :: Database connected & tables ready
+[2026-04-23 12:11:28] INFO     middleware :: SettingsManager reloaded (10 sections)
+[2026-04-23 12:11:28] INFO     middleware :: Settings loaded into SettingsManager
+[2026-04-23 12:15:39] INFO     middleware :: Middleware server stopped
+[2026-04-23 12:15:40] INFO     middleware :: Starting Middleware server …
+[2026-04-23 12:15:40] INFO     middleware :: Database connected & tables ready
+[2026-04-23 12:15:40] INFO     middleware :: SettingsManager reloaded (10 sections)
+[2026-04-23 12:15:40] INFO     middleware :: Settings loaded into SettingsManager
+[2026-04-23 12:16:36] INFO     middleware :: Starting Middleware server …
+[2026-04-23 12:16:36] INFO     middleware :: Database connected & tables ready
+[2026-04-23 12:16:36] INFO     middleware :: SettingsManager reloaded (10 sections)
+[2026-04-23 12:16:36] INFO     middleware :: Settings loaded into SettingsManager
+[2026-04-23 12:16:59] INFO     middleware :: Middleware server stopped
+[2026-04-23 12:18:47] INFO     middleware :: Starting Middleware server …
+[2026-04-23 12:18:47] INFO     middleware :: Database connected & tables ready
+[2026-04-23 12:18:47] INFO     middleware :: SettingsManager reloaded (10 sections)
+[2026-04-23 12:18:47] INFO     middleware :: Settings loaded into SettingsManager
+[2026-04-23 12:19:08] INFO     middleware :: Middleware server stopped
+[2026-04-23 12:19:09] INFO     middleware :: Starting Middleware server …
+[2026-04-23 12:19:09] INFO     middleware :: Database connected & tables ready
+[2026-04-23 12:19:09] INFO     middleware :: SettingsManager reloaded (10 sections)
+[2026-04-23 12:19:09] INFO     middleware :: Settings loaded into SettingsManager
+[2026-04-23 12:19:12] WARNING  middleware :: Wazuh status check failed: [Errno 11001] getaddrinfo failed
+[2026-04-23 12:19:15] WARNING  middleware :: DefectDojo status check failed: Request URL is missing an 'http://' or 'https://' protocol.
+[2026-04-23 12:19:16] WARNING  middleware :: Redmine status check failed: Request URL is missing an 'http://' or 'https://' protocol.
+[2026-04-23 12:19:49] WARNING  middleware :: Wazuh status check failed: [Errno 11001] getaddrinfo failed
+[2026-04-23 12:19:50] WARNING  middleware :: DefectDojo status check failed: Request URL is missing an 'http://' or 'https://' protocol.
+[2026-04-23 12:19:51] WARNING  middleware :: Wazuh status check failed: [Errno 11001] getaddrinfo failed
+[2026-04-23 12:19:52] WARNING  middleware :: DefectDojo status check failed: Request URL is missing an 'http://' or 'https://' protocol.
+[2026-04-23 12:19:54] WARNING  middleware :: Redmine status check failed: Request URL is missing an 'http://' or 'https://' protocol.
+[2026-04-23 13:23:50] INFO     middleware :: Middleware server stopped
+[2026-04-23 13:26:22] INFO     middleware :: Starting Middleware server …
+[2026-04-23 13:26:22] INFO     middleware :: Database connected & tables ready
+[2026-04-23 13:26:22] INFO     middleware :: SettingsManager reloaded (10 sections)
+[2026-04-23 13:26:22] INFO     middleware :: Settings loaded into SettingsManager
+[2026-04-23 13:27:35] WARNING  middleware :: Wazuh status check failed: [Errno 11001] getaddrinfo failed
+[2026-04-23 13:27:36] WARNING  middleware :: DefectDojo status check failed: Request URL is missing an 'http://' or 'https://' protocol.
+[2026-04-23 13:27:37] WARNING  middleware :: Redmine status check failed: Request URL is missing an 'http://' or 'https://' protocol.
+[2026-04-23 13:27:38] WARNING  middleware :: Wazuh status check failed: [Errno 11001] getaddrinfo failed
+[2026-04-23 13:27:39] WARNING  middleware :: DefectDojo status check failed: Request URL is missing an 'http://' or 'https://' protocol.
+[2026-04-23 13:28:02] WARNING  middleware :: Wazuh status check failed: [Errno 11001] getaddrinfo failed
+[2026-04-23 13:28:06] WARNING  middleware :: DefectDojo status check failed: Request URL is missing an 'http://' or 'https://' protocol.
+[2026-04-23 13:28:10] WARNING  middleware :: Redmine status check failed: Request URL is missing an 'http://' or 'https://' protocol.
+[2026-04-23 13:28:41] WARNING  middleware :: Wazuh status check failed: [Errno 11001] getaddrinfo failed
+[2026-04-23 13:28:42] WARNING  middleware :: DefectDojo status check failed: Request URL is missing an 'http://' or 'https://' protocol.
+[2026-04-23 13:28:43] WARNING  middleware :: Redmine status check failed: Request URL is missing an 'http://' or 'https://' protocol.
+[2026-04-23 13:29:15] WARNING  middleware :: Redmine status check failed: Request URL is missing an 'http://' or 'https://' protocol.
+[2026-04-23 13:29:15] WARNING  middleware :: DefectDojo status check failed: Request URL is missing an 'http://' or 'https://' protocol.
+[2026-04-23 13:29:17] WARNING  middleware :: Wazuh status check failed: [Errno 11001] getaddrinfo failed
+[2026-04-23 13:29:37] WARNING  middleware :: Wazuh status check failed: [Errno 11001] getaddrinfo failed
+[2026-04-23 13:29:38] WARNING  middleware :: DefectDojo status check failed: Request URL is missing an 'http://' or 'https://' protocol.
+[2026-04-23 13:29:41] WARNING  middleware :: Wazuh status check failed: [Errno 11001] getaddrinfo failed
+[2026-04-23 13:29:44] WARNING  middleware :: DefectDojo status check failed: Request URL is missing an 'http://' or 'https://' protocol.
+[2026-04-23 13:29:47] WARNING  middleware :: Redmine status check failed: Request URL is missing an 'http://' or 'https://' protocol.
+[2026-04-23 13:30:21] WARNING  middleware :: Redmine status check failed: Request URL is missing an 'http://' or 'https://' protocol.
+[2026-04-23 13:30:22] WARNING  middleware :: DefectDojo status check failed: Request URL is missing an 'http://' or 'https://' protocol.
+[2026-04-23 13:30:23] WARNING  middleware :: Wazuh status check failed: [Errno 11001] getaddrinfo failed
+[2026-04-23 13:33:05] INFO     middleware :: Middleware server stopped
+[2026-04-23 13:33:07] INFO     middleware :: Starting Middleware server …
+[2026-04-23 13:33:07] INFO     middleware :: Database connected & tables ready
+[2026-04-23 13:33:07] INFO     middleware :: SettingsManager reloaded (10 sections)
+[2026-04-23 13:33:07] INFO     middleware :: Settings loaded into SettingsManager
+[2026-04-23 13:40:56] INFO     middleware :: Middleware server stopped
+[2026-04-23 13:40:58] INFO     middleware :: Starting Middleware server …
+[2026-04-23 13:40:58] INFO     middleware :: Database connected & tables ready
+[2026-04-23 13:40:58] INFO     middleware :: SettingsManager reloaded (10 sections)
+[2026-04-23 13:40:58] INFO     middleware :: Settings loaded into SettingsManager
+[2026-04-23 13:41:14] WARNING  middleware :: Wazuh status check failed: [Errno 11001] getaddrinfo failed
+[2026-04-23 13:41:26] WARNING  middleware :: Wazuh status check failed: [Errno 11001] getaddrinfo failed
+[2026-04-23 13:41:27] WARNING  middleware :: DefectDojo status check failed: Request URL is missing an 'http://' or 'https://' protocol.
+[2026-04-23 13:41:28] WARNING  middleware :: Redmine status check failed: Request URL is missing an 'http://' or 'https://' protocol.
+[2026-04-23 13:44:07] INFO     middleware :: Middleware server stopped
+[2026-04-23 13:44:10] INFO     middleware :: Starting Middleware server …
+[2026-04-23 13:44:10] INFO     middleware :: Database connected & tables ready
+[2026-04-23 13:44:10] INFO     middleware :: SettingsManager reloaded (10 sections)
+[2026-04-23 13:44:10] INFO     middleware :: Settings loaded into SettingsManager
+[2026-04-23 14:03:07] INFO     middleware :: Middleware server stopped
+[2026-04-23 14:03:10] INFO     middleware :: Starting Middleware server …
+[2026-04-23 14:03:10] INFO     middleware :: Database connected & tables ready
+[2026-04-23 14:03:10] INFO     middleware :: SettingsManager reloaded (10 sections)
+[2026-04-23 14:03:10] INFO     middleware :: Settings loaded into SettingsManager
+[2026-04-23 14:12:09] WARNING  middleware :: Wazuh status check failed: [Errno 11001] getaddrinfo failed
+[2026-04-23 14:12:16] WARNING  middleware :: DefectDojo status check failed: Request URL is missing an 'http://' or 'https://' protocol.
+[2026-04-23 14:12:36] WARNING  middleware :: Wazuh status check failed: [Errno 11001] getaddrinfo failed
+[2026-04-23 14:12:43] WARNING  middleware :: Redmine status check failed: Request URL is missing an 'http://' or 'https://' protocol.
+[2026-04-23 14:13:35] INFO     middleware :: Starting Middleware server …
+[2026-04-23 14:13:35] INFO     middleware :: Database connected & tables ready
+[2026-04-23 14:13:35] INFO     middleware :: SettingsManager reloaded (10 sections)
+[2026-04-23 14:13:35] INFO     middleware :: Settings loaded into SettingsManager
+[2026-04-23 14:14:07] WARNING  middleware :: Wazuh status check failed: [Errno 11001] getaddrinfo failed
+[2026-04-23 14:14:08] WARNING  middleware :: Wazuh status check failed: [Errno 11001] getaddrinfo failed
+[2026-04-23 14:14:10] WARNING  middleware :: Wazuh status check failed: [Errno 11001] getaddrinfo failed
+[2026-04-23 14:14:10] WARNING  middleware :: DefectDojo status check failed: Request URL is missing an 'http://' or 'https://' protocol.
+[2026-04-23 14:14:12] WARNING  middleware :: Redmine status check failed: Request URL is missing an 'http://' or 'https://' protocol.
+[2026-04-23 14:14:31] INFO     middleware :: SettingsManager reloaded (10 sections)
+[2026-04-23 14:14:31] INFO     middleware :: Settings section 'wazuh' updated and reloaded
+[2026-04-23 14:15:26] WARNING  middleware :: Redmine status check failed: Request URL is missing an 'http://' or 'https://' protocol.
+[2026-04-23 14:15:27] WARNING  middleware :: DefectDojo status check failed: Request URL is missing an 'http://' or 'https://' protocol.
+[2026-04-23 14:15:34] WARNING  middleware :: Wazuh status check failed: [Errno 11001] getaddrinfo failed

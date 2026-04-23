@@ -6,10 +6,10 @@ from __future__ import annotations
 
 import pytest
 
-from src.config import DedupConfig
-from src.models.finding import Finding, FindingSource, Severity
-from src.pipeline.deduplicator import DeduplicatorStage
-from src.pipeline.identity import hydrate_identity
+from app.config import DedupConfig
+from app.models.finding import Finding, FindingSource, Severity
+from app.core.pipeline.deduplicator import DeduplicatorStage
+from app.core.pipeline.identity import hydrate_identity
 
 
 def _make_wazuh_finding(

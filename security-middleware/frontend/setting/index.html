@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Settings – Middleware</title>
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <link rel="stylesheet" href="../shared/style.css">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <main class="main-content">
+            <div class="animate-fade-in">
+                <!-- Section Tabs -->
+                <div class="settings-tabs" id="settings-tabs">
+                    <button class="settings-tab active" data-section="wazuh">Wazuh</button>
+                    <button class="settings-tab" data-section="defectdojo">DefectDojo</button>
+                    <button class="settings-tab" data-section="redmine">Redmine</button>
+                    <button class="settings-tab" data-section="pipeline">Pipeline</button>
+                    <button class="settings-tab" data-section="filter">Filter</button>
+                    <button class="settings-tab" data-section="dedup">Dedup</button>
+                    <button class="settings-tab" data-section="enrichment">Enrichment</button>
+                    <button class="settings-tab" data-section="severity_map">Severity Map</button>
+                    <button class="settings-tab" data-section="storage">Storage</button>
+                    <button class="settings-tab" data-section="logging">Logging</button>
+                </div>
+
+                <!-- Settings Form -->
+                <div class="card settings-card">
+                    <div class="card-header">
+                        <h3 id="settings-section-title">Wazuh Settings</h3>
+                        <button class="btn btn-primary" onclick="saveCurrentSection()">
+                            <i class="ph-bold ph-floppy-disk"></i> Save
+                        </button>
+                    </div>
+                    <div id="settings-form-container">
+                        <div class="loading-placeholder">Loading settings…</div>
+                    </div>
+                </div>
+
+                <!-- Maintenance -->
+                <div class="card mt-md">
+                    <div class="card-header"><h3>Maintenance</h3></div>
+                    <div class="maintenance-actions">
+                        <button class="btn btn-secondary" onclick="doBackup()"><i class="ph-bold ph-download-simple"></i> Backup DB</button>
+                        <button class="btn btn-danger" onclick="doCleanup()"><i class="ph-bold ph-trash"></i> Cleanup Old Data</button>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+    <script src="../shared/components.js"></script>
+    <script src="../shared/api.js"></script>
+    <script src="setting.js"></script>
+</body>
+</html>

@@ -3,8 +3,8 @@ Tests for the Severity Mapper pipeline stage.
 """
 
 import pytest
-from src.models.finding import Finding, FindingSource, Severity
-from src.pipeline.severity_mapper import SeverityMapperStage
+from app.models.finding import Finding, FindingSource, Severity
+from app.core.pipeline.severity_mapper import SeverityMapperStage
 
 
 PRIORITY_MAP = {

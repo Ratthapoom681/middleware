@@ -8,9 +8,9 @@ from pathlib import Path
 
 import yaml
 
-from src import dashboard_history as dashboard_history_module
-from src.sources.defectdojo_client import DefectDojoClient
-from web import server
+from app import dashboard_history as dashboard_history_module
+from app.defectdojo.client import DefectDojoClient
+from app import server
 
 
 def test_config_api_round_trips_new_defectdojo_fields(workspace_tmp_dir, monkeypatch):
@@ -270,8 +270,8 @@ def test_config_api_round_trips_delivery_settings(workspace_tmp_dir, monkeypatch
 
 
 def test_static_ui_assets_reference_new_defectdojo_fields():
-    html = (server.PROJECT_ROOT / "web" / "static" / "index.html").read_text(encoding="utf-8")
-    js = (server.PROJECT_ROOT / "web" / "static" / "js" / "app.js").read_text(encoding="utf-8")
+    html = (server.PROJECT_ROOT / "frontend" / "main" / "index.html").read_text(encoding="utf-8")
+    js = (server.PROJECT_ROOT / "frontend" / "main" / "js" / "app.js").read_text(encoding="utf-8")
 
     for token in [
         "data-section=\"dashboard\"",

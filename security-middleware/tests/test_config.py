@@ -6,8 +6,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from src import config as config_module
-from src.config import _build_config, load_config
+from app import config as config_module
+from app.config import _build_config, load_config
 
 
 def test_build_config_normalizes_legacy_dojo_aliases():

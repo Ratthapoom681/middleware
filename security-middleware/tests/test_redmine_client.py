@@ -8,11 +8,11 @@ import json
 
 import responses
 
-from src.config import EnrichmentConfig, RedmineConfig
-from src.models.finding import Finding, FindingSource, Severity
-from src.output.redmine_client import RedmineClient
-from src.pipeline.enricher import EnricherStage
-from src.pipeline.identity import hydrate_identity
+from app.config import EnrichmentConfig, RedmineConfig
+from app.models.finding import Finding, FindingSource, Severity
+from app.redmine.client import RedmineClient
+from app.core.pipeline.enricher import EnricherStage
+from app.core.pipeline.identity import hydrate_identity
 
 
 @responses.activate

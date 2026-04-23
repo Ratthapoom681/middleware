@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audit – Middleware</title>
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <link rel="stylesheet" href="../shared/style.css">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <main class="main-content">
+            <div class="animate-fade-in">
+                <div class="card">
+                    <div class="card-header">
+                        <h3><i class="ph-bold ph-fingerprint"></i> Audit Trail</h3>
+                        <div class="filter-bar">
+                            <select id="audit-module-filter">
+                                <option value="all">All Modules</option>
+                                <option value="settings">Settings</option>
+                                <option value="pipeline">Pipeline</option>
+                                <option value="wazuh">Wazuh</option>
+                                <option value="defectdojo">DefectDojo</option>
+                                <option value="redmine">Redmine</option>
+                            </select>
+                            <button class="btn btn-primary" onclick="loadAudit()"><i class="ph-bold ph-magnifying-glass"></i> Filter</button>
+                        </div>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table">
+                            <thead><tr><th>Time</th><th>Module</th><th>Action</th><th>User</th><th>Detail</th></tr></thead>
+                            <tbody id="audit-body">
+                                <tr><td colspan="5" class="loading-placeholder">Loading…</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+    <script src="../shared/components.js"></script>
+    <script src="../shared/api.js"></script>
+    <script src="audit.js"></script>
+</body>
+</html>

@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DefectDojo – Middleware</title>
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <link rel="stylesheet" href="../shared/style.css">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <main class="main-content">
+            <div class="animate-fade-in">
+                <div class="card mb-md">
+                    <div class="card-header">
+                        <h3><i class="ph-bold ph-bug"></i> DefectDojo Connection</h3>
+                        <span class="badge badge-info" id="dojo-conn-status">Checking…</span>
+                    </div>
+                    <div class="form-grid">
+                        <div class="form-group"><label>Status</label><span id="dojo-status-text">—</span></div>
+                        <div class="form-group"><label>URL</label><span id="dojo-url-text">—</span></div>
+                        <div class="form-group"><label>Findings</label><span id="dojo-count-text">—</span></div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-header"><h3>Recent Findings</h3></div>
+                    <div class="table-responsive">
+                        <table class="table">
+                            <thead><tr><th>Severity</th><th>Title</th><th>Source ID</th><th>Time</th></tr></thead>
+                            <tbody id="dojo-findings-body">
+                                <tr><td colspan="4" class="loading-placeholder">Loading…</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+    <script src="../shared/components.js"></script>
+    <script src="../shared/api.js"></script>
+    <script src="defectdojo.js"></script>
+</body>
+</html>

@@ -100,7 +100,7 @@ def finding_card(f, index: int = 0) -> None:
 
 
 # --- Mock finding factory -----------------------------------------------------
-from src.models.finding import Finding, FindingSource, Severity  # noqa: E402
+from app.models.finding import Finding, FindingSource, Severity  # noqa: E402
 
 
 def make_findings() -> list[Finding]:
@@ -226,8 +226,8 @@ def debug_filter(findings: list[Finding], verbose: bool) -> list[Finding]:
     """Debug: FilterStage with min_severity=low."""
     banner("STAGE 2 - FILTERING", C.YELLOW)
 
-    from src.config import FilterConfig
-    from src.pipeline.filter import FilterStage
+    from app.config import FilterConfig
+    from app.core.pipeline.filter import FilterStage
 
     config = FilterConfig(min_severity="low", exclude_title_patterns=["^Syslog.*"])
     stage = FilterStage(config)
@@ -270,7 +270,7 @@ def debug_severity_mapper(findings: list[Finding], verbose: bool) -> list[Findin
     """Debug: SeverityMapperStage."""
     banner("STAGE 3 - SEVERITY MAPPING", C.MAGENTA)
 
-    from src.pipeline.severity_mapper import SeverityMapperStage
+    from app.core.pipeline.severity_mapper import SeverityMapperStage
 
     priority_map = {"critical": 5, "high": 4, "medium": 3, "low": 2, "info": 1}
     stage = SeverityMapperStage(priority_map)
@@ -314,8 +314,8 @@ def debug_dedup(findings: list[Finding], verbose: bool) -> list[Finding]:
     """Debug: DeduplicatorStage with a temp database."""
     banner("STAGE 4 - DEDUPLICATION", C.BLUE)
 
-    from src.config import DedupConfig
-    from src.pipeline.deduplicator import DeduplicatorStage
+    from app.config import DedupConfig
+    from app.core.pipeline.deduplicator import DeduplicatorStage
 
     with tempfile.TemporaryDirectory() as tmpdir:
         config = DedupConfig(enabled=True, db_path=str(Path(tmpdir) / "debug_dedup.db"), ttl_hours=1)
@@ -373,8 +373,8 @@ def debug_enrichment(findings: list[Finding], verbose: bool) -> list[Finding]:
     """Debug: EnricherStage."""
     banner("STAGE 5 - ENRICHMENT", C.GREEN)
 
-    from src.config import EnrichmentConfig
-    from src.pipeline.enricher import EnricherStage
+    from app.config import EnrichmentConfig
+    from app.core.pipeline.enricher import EnricherStage
 
     config = EnrichmentConfig(asset_inventory_enabled=False, add_remediation_links=True)
     stage = EnricherStage(config)
@@ -479,9 +479,9 @@ def run_single_stage(stage_name: str, verbose: bool) -> None:
 
     if stage_name == "output":
         # Output needs enrichment first
-        from src.config import EnrichmentConfig
-        from src.pipeline.enricher import EnricherStage
-        from src.pipeline.severity_mapper import SeverityMapperStage
+        from app.config import EnrichmentConfig
+        from app.core.pipeline.enricher import EnricherStage
+        from app.core.pipeline.severity_mapper import SeverityMapperStage
         SeverityMapperStage({"critical": 5, "high": 4, "medium": 3, "low": 2, "info": 1}).process(findings)
         EnricherStage(EnrichmentConfig(add_remediation_links=True)).process(findings)
         debug_output(findings, verbose)

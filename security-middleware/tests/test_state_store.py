@@ -4,8 +4,8 @@ Tests for shared state backends.
 
 from __future__ import annotations
 
-from src.config import StorageConfig
-from src.state_store import PostgresStateStore
+from app.config import StorageConfig
+from app.core.database import PostgresStateStore
 
 
 class _FakeCursor:

@@ -3,9 +3,9 @@ Tests for the Filter pipeline stage.
 """
 
 import pytest
-from src.config import FilterConfig
-from src.models.finding import Finding, FindingSource, Severity
-from src.pipeline.filter import FilterStage
+from app.config import FilterConfig
+from app.models.finding import Finding, FindingSource, Severity
+from app.core.pipeline.filter import FilterStage
 
 
 def _make_finding(

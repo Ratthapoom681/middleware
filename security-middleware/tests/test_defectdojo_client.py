@@ -9,9 +9,9 @@ from uuid import uuid4
 
 import responses
 
-from src.config import DefectDojoConfig
-from src.models.finding import Severity
-from src.sources.defectdojo_client import DefectDojoAPIError, DefectDojoClient
+from app.config import DefectDojoConfig
+from app.models.finding import Severity
+from app.defectdojo.client import DefectDojoAPIError, DefectDojoClient
 
 
 def _make_client(**overrides) -> DefectDojoClient:
@@ -365,7 +365,8 @@ def test_get_finding_count_summary_uses_current_filters_without_checkpoint():
     }
 
     request_url = responses.calls[0].request.url
-    assert "verified=false" in request_url
+    assert "active=true" in request_url
+    assert "verified=" not in request_url
     assert "test__engagement__product=10" in request_url
     assert "last_status_update=" in request_url
 
@@ -385,7 +386,7 @@ def test_get_finding_count_summary_reports_pending_findings_after_checkpoint(wor
                         "severity_filter": ["Critical", "High", "Medium"],
                         "test_ids": [],
                         "updated_since_minutes": 0,
-                        "verified": True,
+                        "verified": False,
                     },
                     sort_keys=True,
                 ),
@@ -503,7 +504,7 @@ def test_updated_since_minutes_change_invalidates_existing_checkpoint(workspace_
                         "severity_filter": ["Critical", "High", "Medium"],
                         "test_ids": [],
                         "updated_since_minutes": 15,
-                        "verified": True,
+                        "verified": False,
                     },
                     sort_keys=True,
                 ),
@@ -521,3 +522,18 @@ def test_updated_since_minutes_change_invalidates_existing_checkpoint(workspace_
     )
 
     assert client._load_cursor() is None
+
+
+def test_build_findings_query_params_only_adds_active_and_verified_when_enabled():
+    inclusive_client = _make_client(active=False, verified=False)
+    inclusive_params, _ = inclusive_client._build_findings_query_params(limit=100, include_checkpoint=False)
+
+    assert "active" not in inclusive_params
+    assert "verified" not in inclusive_params
+    assert inclusive_params["duplicate"] == "false"
+
+    strict_client = _make_client(active=True, verified=True)
+    strict_params, _ = strict_client._build_findings_query_params(limit=100, include_checkpoint=False)
+
+    assert strict_params["active"] == "true"
+    assert strict_params["verified"] == "true"

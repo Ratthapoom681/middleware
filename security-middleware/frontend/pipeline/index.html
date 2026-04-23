@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pipeline – Middleware</title>
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <link rel="stylesheet" href="../shared/style.css">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <main class="main-content">
+            <div class="animate-fade-in">
+                <div class="card mb-md">
+                    <div class="card-header">
+                        <h3><i class="ph-bold ph-git-merge"></i> Pipeline Status</h3>
+                        <span class="badge badge-info" id="pipeline-status-badge">Checking…</span>
+                    </div>
+                    <div class="pipeline-stats">
+                        <div class="card stat-card"><div class="stat-icon indigo"><i class="ph-bold ph-lightning"></i></div><div class="stat-info"><span class="stat-label">Processed</span><h3 class="stat-value" id="p-processed">0</h3></div></div>
+                        <div class="card stat-card"><div class="stat-icon emerald"><i class="ph-bold ph-copy-slash"></i></div><div class="stat-info"><span class="stat-label">Deduplicated</span><h3 class="stat-value" id="p-dedup">0</h3></div></div>
+                        <div class="card stat-card"><div class="stat-icon sky"><i class="ph-bold ph-funnel"></i></div><div class="stat-info"><span class="stat-label">Filtered</span><h3 class="stat-value" id="p-filtered">0</h3></div></div>
+                        <div class="card stat-card"><div class="stat-icon violet"><i class="ph-bold ph-paper-plane-tilt"></i></div><div class="stat-info"><span class="stat-label">Delivered</span><h3 class="stat-value" id="p-delivered">0</h3></div></div>
+                        <div class="card stat-card"><div class="stat-icon rose"><i class="ph-bold ph-x-circle"></i></div><div class="stat-info"><span class="stat-label">Failed</span><h3 class="stat-value" id="p-failed">0</h3></div></div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-header"><h3>Dead-Letter Queue</h3></div>
+                    <div class="table-responsive">
+                        <table class="table">
+                            <thead><tr><th>Finding ID</th><th>Error</th><th>Retries</th><th>Time</th></tr></thead>
+                            <tbody id="dead-letter-body">
+                                <tr><td colspan="4" class="loading-placeholder">Loading…</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+    <script src="../shared/components.js"></script>
+    <script src="../shared/api.js"></script>
+    <script src="pipeline.js"></script>
+</body>
+</html>

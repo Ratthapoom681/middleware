@@ -8,6 +8,8 @@ A Python middleware service that ingests security findings from **Wazuh SIEM** a
 
 ## Engineering Docs
 
+- [Workflow Diagram](C:/Users/ifilm/Downloads/Document/security-middleware/WORKFLOW_DIAGRAM.md)
+- [Workflow Guide](C:/Users/ifilm/Downloads/Document/security-middleware/WORKFLOW.md)
 - [Implementation Plan](C:/Users/ifilm/Downloads/Document/security-middleware/IMPLEMENTATION_PLAN.md)
 - [Frontend Developer README](C:/Users/ifilm/Downloads/Document/security-middleware/web/FRONTEND_README.md)
 
@@ -82,22 +84,22 @@ export REDMINE_API_KEY="your-key"
 
 ```bash
 # Continuous polling mode
-python -m src.main
+python -m app.main
 
 # Single cycle (useful for cron)
-python -m src.main --once
+python -m app.main --once
 
 # Run the Redmine delivery worker for queued jobs
-python -m src.main --delivery-worker
+python -m app.main --delivery-worker
 
 # Run the persisted-ingest decision worker
-python -m src.main --decision-worker
+python -m app.main --decision-worker
 
 # Test connections only
-python -m src.main --test
+python -m app.main --test
 
 # Custom config path
-python -m src.main -c /path/to/config.yaml
+python -m app.main -c /path/to/config.yaml
 ```
 
 ### 4. Docker
@@ -178,10 +180,10 @@ source venv/bin/activate
 set -a; source /etc/security-middleware/env; set +a
 
 # Verify connectivity to Wazuh, DefectDojo, Redmine
-python -m src.main --test
+python -m app.main --test
 
 # Run a single cycle to confirm the pipeline works
-python -m src.main --once
+python -m app.main --once
 ```
 
 #### Run as a systemd service (persistent)
@@ -198,7 +200,7 @@ Type=simple
 User=ec2-user
 WorkingDirectory=/opt/security-middleware
 EnvironmentFile=/etc/security-middleware/env
-ExecStart=/opt/security-middleware/venv/bin/python -m src.main
+ExecStart=/opt/security-middleware/venv/bin/python -m app.main
 Restart=on-failure
 RestartSec=30
 
@@ -306,7 +308,7 @@ When `storage.backend` is set to `postgres`:
 
 When `pipeline.delivery.store_first_ingest` is enabled:
 - raw Wazuh and DefectDojo payloads are persisted into `storage.ingest_event_table` before filter/dedup/enrich runs
-- the normal poller can process those persisted events immediately, or you can drain them with `python -m src.main --decision-worker`
+- the normal poller can process those persisted events immediately, or you can drain them with `python -m app.main --decision-worker`
 - DefectDojo checkpoints only advance after the persisted ingest batch has been processed successfully
 
 ---

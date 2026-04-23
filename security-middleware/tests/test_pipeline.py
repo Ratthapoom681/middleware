@@ -7,8 +7,8 @@ from datetime import datetime, timedelta, timezone
 import pytest
 import responses
 
-from src import dashboard_history as dashboard_history_module
-from src.config import (
+from app import dashboard_history as dashboard_history_module
+from app.config import (
     AppConfig,
     WazuhConfig,
     DefectDojoConfig,
@@ -19,9 +19,9 @@ from src.config import (
     DeliveryConfig,
     EnrichmentConfig,
 )
-from src.main import MiddlewarePipeline
-from src.models.finding import Finding, FindingSource, Severity
-from src.pipeline.identity import hydrate_identity
+from app.main import MiddlewarePipeline
+from app.models.finding import Finding, FindingSource, Severity
+from app.core.pipeline.identity import hydrate_identity
 
 
 @pytest.fixture

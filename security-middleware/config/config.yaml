@@ -34,7 +34,7 @@ defectdojo:
   engagement_ids: []
   test_ids: []
   active: true
-  verified: true
+  verified: false
   updated_since_minutes: 0
   fetch_limit: 1000
   cursor_path: "data/defectdojo_cursor.json"

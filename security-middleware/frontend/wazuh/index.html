@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wazuh – Middleware</title>
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <link rel="stylesheet" href="../shared/style.css">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <main class="main-content">
+            <div class="animate-fade-in">
+                <div class="card mb-md">
+                    <div class="card-header">
+                        <h3><i class="ph-bold ph-shield"></i> Wazuh Connection</h3>
+                        <span class="badge badge-info" id="wazuh-conn-status">Checking…</span>
+                    </div>
+                    <div class="form-grid">
+                        <div class="form-group"><label>Status</label><span id="wazuh-status-text">—</span></div>
+                        <div class="form-group"><label>URL</label><span id="wazuh-url-text">—</span></div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Recent Wazuh Alerts</h3>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table">
+                            <thead><tr><th>Severity</th><th>Title</th><th>Source ID</th><th>Time</th></tr></thead>
+                            <tbody id="wazuh-alerts-body">
+                                <tr><td colspan="4" class="loading-placeholder">Loading…</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+    <script src="../shared/components.js"></script>
+    <script src="../shared/api.js"></script>
+    <script src="wazuh.js"></script>
+</body>
+</html>

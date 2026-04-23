@@ -52,7 +52,7 @@ def main():
         resp.raise_for_status()
         logging.info(f"Success! Response: {resp.text}")
     except requests.exceptions.ConnectionError:
-        logging.error(f"Connection Failed. Is the server running? (python -m web.server)")
+        logging.error(f"Connection Failed. Is the server running? (python -m app.server)")
     except Exception as e:
         logging.error(f"Failed to post: {e}")
         if 'resp' in locals():

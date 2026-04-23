@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard – Middleware</title>
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <link rel="stylesheet" href="../shared/style.css">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <main class="main-content">
+            <div class="dashboard-grid animate-fade-in">
+                <div class="card stat-card">
+                    <div class="stat-icon indigo"><i class="ph-bold ph-shield-warning"></i></div>
+                    <div class="stat-info">
+                        <span class="stat-label">Total Alerts</span>
+                        <h3 class="stat-value" id="total-alerts">0</h3>
+                        <span class="stat-trend">All sources</span>
+                    </div>
+                </div>
+                <div class="card stat-card">
+                    <div class="stat-icon emerald"><i class="ph-bold ph-copy-slash"></i></div>
+                    <div class="stat-info">
+                        <span class="stat-label">Deduplicated</span>
+                        <h3 class="stat-value" id="dedup-rate">0%</h3>
+                        <span class="stat-trend"><i class="ph-bold ph-check"></i> Optimization</span>
+                    </div>
+                </div>
+                <div class="card stat-card">
+                    <div class="stat-icon sky"><i class="ph-bold ph-ticket"></i></div>
+                    <div class="stat-info">
+                        <span class="stat-label">Tickets Created</span>
+                        <h3 class="stat-value" id="tickets-count">0</h3>
+                        <span class="stat-trend">Delivered to Redmine</span>
+                    </div>
+                </div>
+                <div class="card stat-card">
+                    <div class="stat-icon violet"><i class="ph-bold ph-activity"></i></div>
+                    <div class="stat-info">
+                        <span class="stat-label">System Health</span>
+                        <h3 class="stat-value" id="system-health">Healthy</h3>
+                        <span class="stat-trend">Pipeline active</span>
+                    </div>
+                </div>
+
+                <div class="card chart-container">
+                    <div class="card-header">
+                        <h3>Pipeline Activity</h3>
+                    </div>
+                    <div class="placeholder-chart">
+                        <div class="chart-bar-container">
+                            <div class="bar" style="height:40%"></div>
+                            <div class="bar" style="height:60%"></div>
+                            <div class="bar" style="height:80%"></div>
+                            <div class="bar" style="height:50%"></div>
+                            <div class="bar" style="height:90%"></div>
+                            <div class="bar" style="height:70%"></div>
+                            <div class="bar" style="height:85%"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card list-container">
+                    <div class="card-header">
+                        <h3>Recent Findings</h3>
+                        <a href="../logs/index.html" class="link-btn">View All</a>
+                    </div>
+                    <div class="recent-list" id="recent-logs">
+                        <div class="loading-placeholder">Loading...</div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="../shared/components.js"></script>
+    <script src="../shared/api.js"></script>
+    <script src="main.js"></script>
+</body>
+</html>

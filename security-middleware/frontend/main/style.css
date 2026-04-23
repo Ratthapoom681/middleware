@@ -1,0 +1,44 @@
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1.25rem;
+}
+.chart-container, .list-container {
+    grid-column: span 2;
+}
+.placeholder-chart { padding: 1rem 0; }
+.chart-bar-container {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    height: 120px;
+}
+.bar {
+    flex: 1;
+    background: linear-gradient(180deg, var(--primary), var(--accent));
+    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+    min-height: 10px;
+    transition: height 0.5s ease;
+}
+.log-item {
+    padding: 0.6rem 0;
+    border-bottom: 1px solid var(--border);
+}
+.log-item:last-child { border-bottom: none; }
+.log-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.25rem;
+}
+.log-source { font-size: 0.75rem; color: var(--text-muted); }
+.log-msg { font-size: 0.85rem; }
+
+@media (max-width: 1024px) {
+    .dashboard-grid { grid-template-columns: repeat(2, 1fr); }
+    .chart-container, .list-container { grid-column: span 2; }
+}
+@media (max-width: 640px) {
+    .dashboard-grid { grid-template-columns: 1fr; }
+    .chart-container, .list-container { grid-column: 1; }
+}

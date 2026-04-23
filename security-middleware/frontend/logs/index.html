@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Logs – Middleware</title>
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <link rel="stylesheet" href="../shared/style.css">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <main class="main-content">
+            <div class="animate-fade-in">
+                <div class="card mb-md">
+                    <div class="card-header">
+                        <h3><i class="ph-bold ph-list-bullets"></i> All Findings</h3>
+                        <div class="filter-bar">
+                            <select id="log-source-filter">
+                                <option value="all">All Sources</option>
+                                <option value="wazuh">Wazuh</option>
+                                <option value="defectdojo">DefectDojo</option>
+                            </select>
+                            <select id="log-level-filter">
+                                <option value="all">All Severities</option>
+                                <option value="critical">Critical</option>
+                                <option value="high">High</option>
+                                <option value="medium">Medium</option>
+                                <option value="low">Low</option>
+                                <option value="info">Info</option>
+                            </select>
+                            <button class="btn btn-primary" onclick="loadLogs()"><i class="ph-bold ph-magnifying-glass"></i> Filter</button>
+                        </div>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table">
+                            <thead><tr><th>Severity</th><th>Source</th><th>Title</th><th>Status</th><th>Time</th></tr></thead>
+                            <tbody id="logs-body">
+                                <tr><td colspan="5" class="loading-placeholder">Loading…</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+    <script src="../shared/components.js"></script>
+    <script src="../shared/api.js"></script>
+    <script src="logs.js"></script>
+</body>
+</html>
