@@ -64,15 +64,20 @@ dead_letter = sqlalchemy.Table(
 
 
 async def create_tables():
-    """Create all tables if they don't exist (SQLite)."""
+    """Create all tables if they don't exist (SQLite or PostgreSQL)."""
     import os
-    import sqlite3
 
-    db_path = settings.DATABASE_URL.replace("sqlite:///", "")
-    os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    url = settings.DATABASE_URL
 
-    conn = sqlite3.connect(db_path)
-    engine = sqlalchemy.create_engine(f"sqlite:///{db_path}")
+    # For SQLite, ensure the parent directory exists
+    if url.startswith("sqlite"):
+        db_path = url.replace("sqlite:///", "")
+        if db_path.startswith("./"):
+            db_path = db_path[2:]
+        parent = os.path.dirname(db_path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+
+    engine = sqlalchemy.create_engine(url)
     metadata.create_all(engine)
     engine.dispose()
-    conn.close()

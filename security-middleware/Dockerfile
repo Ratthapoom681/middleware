@@ -1,22 +1,26 @@
 FROM python:3.11-slim
 
 LABEL maintainer="security-team"
-LABEL description="Security Middleware Pipeline — Wazuh/DefectDojo → Redmine"
+LABEL description="Security Middleware — Wazuh/DefectDojo → Redmine"
 
 WORKDIR /app
 
-# Install dependencies
+# Install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy source code
-COPY src/ src/
-COPY web/ web/
+# Copy application code
+COPY main.py .
+COPY app/ app/
+COPY frontend/ frontend/
 COPY config/ config/
 
-# Create data directory for SQLite dedup database
-RUN mkdir -p /app/data
+# Create data directories for logs, local DB fallback, and backups
+RUN mkdir -p /app/data/db /app/data/logs /app/data/backups
 
-# Default command: run the pipeline
-ENTRYPOINT ["python", "-m", "src.main"]
-CMD []
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/pipeline/status')" || exit 1
+
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

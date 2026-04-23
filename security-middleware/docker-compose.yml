@@ -1,20 +1,16 @@
-version: "3.8"
-
 services:
   postgres:
-    image: postgres:16
-    container_name: security-middleware-postgres
+    image: postgres:16-alpine
+    container_name: middleware-db
     restart: unless-stopped
     environment:
-      POSTGRES_DB: security
+      POSTGRES_DB: middleware
       POSTGRES_USER: middleware
-      POSTGRES_PASSWORD: middleware
-    ports:
-      - "5432:5432"
+      POSTGRES_PASSWORD: middleware_secret
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U middleware -d security"]
+      test: ["CMD-SHELL", "pg_isready -U middleware -d middleware"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -23,20 +19,24 @@ services:
     build: .
     container_name: security-middleware
     restart: unless-stopped
-    network_mode: host
+    ports:
+      - "8000:8000"
     depends_on:
       postgres:
         condition: service_healthy
+    environment:
+      DATABASE_URL: "postgresql://middleware:middleware_secret@postgres:5432/middleware"
+      HOST: "0.0.0.0"
+      PORT: "8000"
+      LOG_LEVEL: "INFO"
+      LOG_FILE: "data/logs/middleware.log"
     volumes:
       # Mount config for easy editing from host and web UI saving
       - ./config:/app/config
-      # Persist the dedup SQLite database
+      # Persist data (logs, backups, local dedup DB)
       - middleware-data:/app/data
-      # Mount Wazuh alerts log for direct file reading
-      - /var/ossec/logs/alerts:/var/ossec/logs/alerts:ro
-    # Environment variables removed to allow Web UI config.yaml to take precedence
-    # Optional: run in single-cycle mode for testing
-    # command: ["--once"]
+      # Uncomment if Wazuh is running on the Docker host:
+      # - /var/ossec/logs/alerts:/var/ossec/logs/alerts:ro
 
 volumes:
   middleware-data:

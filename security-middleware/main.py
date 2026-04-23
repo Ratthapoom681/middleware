@@ -13,6 +13,8 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
+import json
+from pathlib import Path
 
 from app.config import settings
 from app.core.database import database, create_tables
@@ -31,6 +33,49 @@ from app.data_retention.routes import router as retention_router
 from app.audit.routes import router as audit_router
 
 
+async def _seed_settings_from_yaml():
+    """Seed the settings table from config/config.yaml on first run."""
+    import yaml
+    from app.core.database import settings_table
+
+    row = await database.fetch_one(settings_table.select().limit(1))
+    if row is not None:
+        return  # Settings already exist
+
+    yaml_path = Path(__file__).parent / "config" / "config.yaml"
+    if not yaml_path.exists():
+        logger.info("No config.yaml found, using built-in defaults")
+        return
+
+    with open(yaml_path) as f:
+        raw = yaml.safe_load(f) or {}
+
+    sections = {}
+    for key in ("wazuh", "defectdojo", "redmine", "storage", "logging"):
+        if key in raw:
+            sections[key] = raw[key]
+
+    if "pipeline" in raw:
+        p = raw["pipeline"]
+        sections["pipeline"] = {
+            "poll_interval": p.get("poll_interval", 300),
+            "initial_lookback_minutes": p.get("initial_lookback_minutes", 1440),
+        }
+        for sub in ("filter", "dedup", "enrichment"):
+            if sub in p:
+                sections[sub] = p[sub]
+
+    for section, config in sections.items():
+        await database.execute(
+            settings_table.insert().values(
+                section=section,
+                config_json=json.dumps(config),
+            )
+        )
+
+    logger.info("Seeded %d settings sections from config.yaml", len(sections))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup / Shutdown lifecycle."""
@@ -38,6 +83,9 @@ async def lifespan(app: FastAPI):
     await database.connect()
     await create_tables()
     logger.info("Database connected & tables ready")
+
+    # Seed settings from config.yaml on first run
+    await _seed_settings_from_yaml()
 
     # Load all settings into memory
     await settings_manager.reload()
@@ -83,5 +131,5 @@ if __name__ == "__main__":
         "main:app",
         host=settings.HOST,
         port=settings.PORT,
-        reload=True,
+        reload=True,  # Dev only; Docker CMD bypasses __main__
     )

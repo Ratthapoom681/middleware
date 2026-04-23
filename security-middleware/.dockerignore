@@ -1,0 +1,18 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+data/
+.pytest_cache/
+pytest-temp-run/
+test-runtime/
+.pytest-tmp/
+tests/
+.vscode/
+.git/
+.gitignore
+.env
+*.md
+debug_*.py
+.uv-cache/
+Structure plan.md
