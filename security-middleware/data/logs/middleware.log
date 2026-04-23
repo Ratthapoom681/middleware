@@ -115,3 +115,14 @@
 [2026-04-23 14:32:35] INFO     middleware :: Database connected & tables ready
 [2026-04-23 14:32:35] INFO     middleware :: SettingsManager reloaded (10 sections)
 [2026-04-23 14:32:35] INFO     middleware :: Settings loaded into SettingsManager
+[2026-04-23 14:41:46] INFO     middleware :: Middleware server stopped
+[2026-04-23 14:41:47] INFO     middleware :: Starting Middleware server …
+[2026-04-23 14:41:47] INFO     middleware :: Database connected & tables ready
+[2026-04-23 14:41:47] INFO     middleware :: SettingsManager reloaded (10 sections)
+[2026-04-23 14:41:47] INFO     middleware :: Settings loaded into SettingsManager
+[2026-04-23 14:57:35] INFO     middleware :: Middleware server stopped
+[2026-04-23 14:57:36] INFO     middleware :: Starting Middleware server …
+[2026-04-23 14:57:36] INFO     middleware :: Connecting to database sqlite:///./data/db/middleware.db
+[2026-04-23 14:57:36] INFO     middleware :: Database connected & tables ready
+[2026-04-23 14:57:36] INFO     middleware :: SettingsManager reloaded (10 sections)
+[2026-04-23 14:57:36] INFO     middleware :: Settings loaded into SettingsManager

@@ -19,6 +19,7 @@ from pathlib import Path
 from app.config import settings
 from app.core.database import database, create_tables
 from app.core.logger import logger
+from app.core.startup import build_database_startup_error, redact_database_url
 from app.settings.models import settings_manager
 
 # ── Route imports ──
@@ -80,7 +81,12 @@ async def _seed_settings_from_yaml():
 async def lifespan(app: FastAPI):
     """Startup / Shutdown lifecycle."""
     logger.info("Starting Middleware server …")
-    await database.connect()
+    logger.info("Connecting to database %s", redact_database_url(settings.DATABASE_URL))
+    try:
+        await database.connect()
+    except Exception as exc:
+        logger.exception(build_database_startup_error(settings.DATABASE_URL, exc))
+        raise
     await create_tables()
     logger.info("Database connected & tables ready")
 

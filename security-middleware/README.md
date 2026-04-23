@@ -115,7 +115,9 @@ docker-compose logs -f middleware
 docker-compose run middleware --once
 ```
 
-The bundled `docker-compose.yml` starts a local PostgreSQL container too. Because the middleware service runs with `network_mode: host`, use `127.0.0.1:5432` in `config/config.yaml` when you want the middleware to use that local Postgres instance.
+The bundled `docker-compose.yml` starts a local PostgreSQL container too. The middleware service reaches it over the default Compose network at `postgres:5432`, and both services now read the same `POSTGRES_*` credential values.
+
+If you change `POSTGRES_PASSWORD` after the `postgres-data` volume already exists, PostgreSQL keeps the old role password. For disposable local data, reset the stack with `docker compose down -v` before bringing it back up. Otherwise, update the `middleware` role password inside PostgreSQL to match the new value.
 
 ### 5. Quick Start — Amazon Linux (EC2)
 
@@ -281,7 +283,7 @@ pipeline:
 ```yaml
 storage:
   backend: "postgres"              # local or postgres
-  postgres_dsn: "postgresql://middleware:middleware@127.0.0.1:5432/security"
+  postgres_dsn: "postgresql://middleware:middleware_secret@postgres:5432/middleware"
   postgres_schema: "middleware"
   dedup_table: "middleware_seen_hashes"
   checkpoint_table: "middleware_checkpoints"
@@ -304,7 +306,7 @@ When `storage.backend` is set to `postgres`:
 - DefectDojo incremental checkpoints move from local JSON files into Postgres
 - ticket-state cache, ingest-event staging, and outbound queue can use the same shared Postgres schema
 - multiple middleware instances can share the same state safely
-- in the default `docker-compose.yml`, use `127.0.0.1:5432` for `postgres_dsn` because the middleware container uses host networking
+- in the default `docker-compose.yml`, use `postgres:5432` for `postgres_dsn`; use `127.0.0.1:5432` only when the app is running directly on the host
 
 When `pipeline.delivery.store_first_ingest` is enabled:
 - raw Wazuh and DefectDojo payloads are persisted into `storage.ingest_event_table` before filter/dedup/enrich runs

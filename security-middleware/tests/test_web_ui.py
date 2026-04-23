@@ -195,7 +195,7 @@ def test_config_api_round_trips_storage_backend(workspace_tmp_dir, monkeypatch):
             {
                 "storage": {
                     "backend": "postgres",
-                    "postgres_dsn": "postgresql://middleware:secret@db/security",
+                    "postgres_dsn": "postgresql://middleware:middleware_secret@db/middleware",
                     "postgres_schema": "middleware",
                     "dedup_table": "seen_hashes",
                     "checkpoint_table": "checkpoints",
@@ -214,7 +214,7 @@ def test_config_api_round_trips_storage_backend(workspace_tmp_dir, monkeypatch):
         payload = response.get_json()["config"]
 
         assert payload["storage"]["backend"] == "postgres"
-        assert payload["storage"]["postgres_dsn"] == "postgresql://middleware:secret@db/security"
+        assert payload["storage"]["postgres_dsn"] == "postgresql://middleware:middleware_secret@db/middleware"
 
         payload["storage"]["postgres_schema"] = "analytics"
         payload["storage"]["dedup_table"] = "dedup_state"

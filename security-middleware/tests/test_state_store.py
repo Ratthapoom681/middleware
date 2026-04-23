@@ -69,7 +69,7 @@ def test_postgres_commit_new_preserves_existing_counters_and_first_seen():
     store = PostgresStateStore(
         StorageConfig(
             backend="postgres",
-            postgres_dsn="postgresql://middleware:secret@db/security",
+            postgres_dsn="postgresql://middleware:middleware_secret@db/middleware",
             postgres_schema="middleware",
             dedup_table="seen_hashes",
             checkpoint_table="checkpoints",
@@ -99,7 +99,7 @@ def test_postgres_init_creates_ticket_state_and_outbound_queue_tables():
     PostgresStateStore(
         StorageConfig(
             backend="postgres",
-            postgres_dsn="postgresql://middleware:secret@db/security",
+            postgres_dsn="postgresql://middleware:middleware_secret@db/middleware",
             postgres_schema="middleware",
             dedup_table="seen_hashes",
             checkpoint_table="checkpoints",
@@ -123,7 +123,7 @@ def test_postgres_save_ticket_state_upserts_delivery_metadata():
     store = PostgresStateStore(
         StorageConfig(
             backend="postgres",
-            postgres_dsn="postgresql://middleware:secret@db/security",
+            postgres_dsn="postgresql://middleware:middleware_secret@db/middleware",
             postgres_schema="middleware",
             dedup_table="seen_hashes",
             checkpoint_table="checkpoints",
@@ -156,7 +156,7 @@ def test_postgres_claim_outbound_jobs_uses_skip_locked_and_processing_transition
     store = PostgresStateStore(
         StorageConfig(
             backend="postgres",
-            postgres_dsn="postgresql://middleware:secret@db/security",
+            postgres_dsn="postgresql://middleware:middleware_secret@db/middleware",
             postgres_schema="middleware",
             dedup_table="seen_hashes",
             checkpoint_table="checkpoints",
@@ -197,7 +197,7 @@ def test_postgres_append_and_claim_ingest_events_support_id_scoping():
     store = PostgresStateStore(
         StorageConfig(
             backend="postgres",
-            postgres_dsn="postgresql://middleware:secret@db/security",
+            postgres_dsn="postgresql://middleware:middleware_secret@db/middleware",
             postgres_schema="middleware",
             dedup_table="seen_hashes",
             checkpoint_table="checkpoints",

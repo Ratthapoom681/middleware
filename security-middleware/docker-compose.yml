@@ -4,13 +4,13 @@ services:
     container_name: middleware-db
     restart: unless-stopped
     environment:
-      POSTGRES_DB: middleware
-      POSTGRES_USER: middleware
-      POSTGRES_PASSWORD: middleware_secret
+      POSTGRES_DB: "${POSTGRES_DB:-middleware}"
+      POSTGRES_USER: "${POSTGRES_USER:-middleware}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-middleware_secret}"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U middleware -d middleware"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -25,7 +25,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: "postgresql://middleware:middleware_secret@postgres:5432/middleware"
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-middleware}:${POSTGRES_PASSWORD:-middleware_secret}@postgres:5432/${POSTGRES_DB:-middleware}"
       HOST: "0.0.0.0"
       PORT: "8000"
       LOG_LEVEL: "INFO"
