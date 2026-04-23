@@ -5,6 +5,10 @@ LABEL description="Security Middleware — Wazuh/DefectDojo → Redmine"
 
 WORKDIR /app
 
+# Install PostgreSQL client tools (pg_dump / psql for backup & restore)
+RUN apt-get update && apt-get install -y --no-install-recommends postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

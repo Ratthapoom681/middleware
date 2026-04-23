@@ -214,8 +214,12 @@ async function saveCurrentSection() {
 async function doBackup() {
     try {
         const res = await API.triggerBackup();
-        COMPONENTS.toast(`Backup created: ${res.backup_path}`, 'success');
-        loadBackups();
+        if (res.status === 'ok') {
+            COMPONENTS.toast(`Backup created: ${res.backup_path}`, 'success');
+            loadBackups();
+        } else {
+            COMPONENTS.toast(res.message || 'Backup failed', 'error');
+        }
     } catch (e) {
         COMPONENTS.toast(`Backup failed: ${e.message}`, 'error');
     }

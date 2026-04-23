@@ -19,15 +19,18 @@ async def get_status():
 @router.post("/backup")
 async def trigger_backup():
     """Manually trigger a database backup."""
-    path = await backup.create_backup()
+    try:
+        path = await backup.create_backup()
 
-    await log_action(
-        module="data_retention",
-        action="backup",
-        detail=f"Manual backup created: {path}",
-    )
+        await log_action(
+            module="data_retention",
+            action="backup",
+            detail=f"Manual backup created: {path}",
+        )
 
-    return {"backup_path": path}
+        return {"status": "ok", "backup_path": path}
+    except Exception as e:
+        return {"status": "error", "message": f"Backup failed: {str(e)}"}
 
 
 @router.get("/backups")
