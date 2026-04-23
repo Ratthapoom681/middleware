@@ -43,7 +43,7 @@ async def get_section(section: str) -> Optional[dict]:
 async def upsert_section(section: str, config: dict[str, Any]) -> dict:
     """Insert or update a settings section and trigger hot-reload."""
     config_json = json.dumps(config)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
 
     existing = await database.fetch_one(
         settings_table.select().where(settings_table.c.section == section)

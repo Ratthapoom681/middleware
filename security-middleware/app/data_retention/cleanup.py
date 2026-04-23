@@ -7,7 +7,7 @@ from app.core.logger import logger
 
 async def cleanup_old_data(retention_days: int = 90) -> int:
     """Delete findings, audit entries, and dead letters older than retention_days."""
-    cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).replace(tzinfo=None)
     total_deleted = 0
 
     for table in (findings, audit_log, dead_letter):

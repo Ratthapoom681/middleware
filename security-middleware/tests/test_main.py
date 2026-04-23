@@ -2,7 +2,7 @@
 Tests for startup diagnostics in the root FastAPI entry point.
 """
 
-from app.core.startup import build_database_startup_error, redact_database_url
+from main import _build_database_startup_error, _redact_database_url
 
 
 class InvalidPasswordError(Exception):
@@ -10,13 +10,13 @@ class InvalidPasswordError(Exception):
 
 
 def test_redact_database_url_masks_password():
-    assert redact_database_url(
+    assert _redact_database_url(
         "postgresql://middleware:middleware_secret@postgres:5432/middleware"
     ) == "postgresql://middleware:***@postgres:5432/middleware"
 
 
 def test_build_database_startup_error_explains_stale_volume():
-    message = build_database_startup_error(
+    message = _build_database_startup_error(
         "postgresql://middleware:middleware_secret@postgres:5432/middleware",
         InvalidPasswordError('password authentication failed for user "middleware"'),
     )

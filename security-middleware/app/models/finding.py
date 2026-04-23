@@ -172,9 +172,9 @@ class Finding:
             try:
                 timestamp = datetime.fromisoformat(str(timestamp_raw).replace("Z", "+00:00"))
             except ValueError:
-                timestamp = datetime.now(timezone.utc)
+                timestamp = datetime.now(timezone.utc).replace(tzinfo=None)
         else:
-            timestamp = datetime.now(timezone.utc)
+            timestamp = datetime.now(timezone.utc).replace(tzinfo=None)
 
         finding = cls(
             source=FindingSource(str(data.get("source", FindingSource.WAZUH.value)).strip().lower()),
