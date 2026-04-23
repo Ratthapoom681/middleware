@@ -33,6 +33,20 @@ async def trigger_job(job_name: str) -> dict:
         return {"status": "error", "message": f"Unknown job: {job_name}"}
 
     _jobs[job_name]["last_run"] = datetime.now(timezone.utc).isoformat()
-    logger.info("Job '%s' triggered manually", job_name)
 
+    if job_name == "pipeline_poll":
+        # Run the pipeline orchestrator immediately
+        from app.scheduler.runner import trigger_immediate_run
+        result = await trigger_immediate_run()
+        logger.info("Job '%s' triggered manually — %s", job_name, result.get("status"))
+        return {"status": "ok", "job": job_name, **result}
+
+    elif job_name == "data_cleanup":
+        # Run data retention cleanup
+        from app.data_retention.cleanup import cleanup_old_data
+        deleted = await cleanup_old_data()
+        logger.info("Job '%s' triggered manually — deleted %d records", job_name, deleted)
+        return {"status": "ok", "job": job_name, "deleted_records": deleted}
+
+    logger.info("Job '%s' triggered manually", job_name)
     return {"status": "ok", "job": job_name, "message": f"Job '{job_name}' triggered"}

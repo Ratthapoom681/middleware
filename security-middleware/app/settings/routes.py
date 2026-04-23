@@ -4,6 +4,7 @@ from fastapi import APIRouter
 from app.settings import models
 from app.settings.schema import SettingsUpdate
 from app.core.websocket import ws_manager
+from app.audit.models import log_action
 
 router = APIRouter()
 
@@ -35,4 +36,12 @@ async def update_section(section: str, body: SettingsUpdate):
         "section": section,
     })
 
+    # Record the change in the audit log
+    await log_action(
+        module="settings",
+        action="update",
+        detail=f"Updated section: {section}",
+    )
+
     return result
+

@@ -8,6 +8,7 @@ Usage:
     uvicorn main:app --reload --host 0.0.0.0 --port 8000
 """
 
+import asyncio
 import uvicorn
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -136,7 +137,19 @@ async def lifespan(app: FastAPI):
     await settings_manager.reload()
     logger.info("Settings loaded into SettingsManager")
 
+    # Start the background pipeline scheduler
+    from app.scheduler.runner import start_background_pipeline
+    pipeline_task = start_background_pipeline()
+    logger.info("Background pipeline scheduler started")
+
     yield
+
+    # Graceful shutdown
+    pipeline_task.cancel()
+    try:
+        await pipeline_task
+    except asyncio.CancelledError:
+        pass
     await database.disconnect()
     logger.info("Middleware server stopped")
 
