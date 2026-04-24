@@ -385,6 +385,13 @@ async def _restore_pg_json(backup_path: str):
                                         pass
 
                     conn.execute(table.insert(), rows)
+                    
+            if engine.dialect.name == "postgresql":
+                for table in app_metadata.sorted_tables:
+                    try:
+                        conn.execute(sqlalchemy.text(f"SELECT setval(pg_get_serial_sequence('{table.name}', 'id'), coalesce(max(id),0) + 1, false) FROM {table.name};"))
+                    except Exception:
+                        pass
     finally:
         engine.dispose()
 

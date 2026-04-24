@@ -250,3 +250,4 @@
 [2026-04-24 10:49:39] INFO     middleware :: Background pipeline scheduler started
 [2026-04-24 10:49:44] INFO     middleware :: Data cleanup: removed 0 records older than 90 days
 [2026-04-24 10:49:45] INFO     middleware :: Job 'pipeline_poll' triggered manually — ok
+[2026-04-24 10:58:16] INFO     middleware :: Middleware server stopped

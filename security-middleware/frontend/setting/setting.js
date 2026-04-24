@@ -18,6 +18,8 @@ const FIELD_DEFS = {
         { key: 'alerts_json_path', label: 'Alerts JSON Path', type: 'text' },
         { key: 'min_level', label: 'Min Alert Level (0-15)', type: 'number', min: 0, max: 15 },
         { key: 'verify_ssl', label: 'Verify SSL', type: 'toggle' },
+        { key: 'webhook_api_key', label: 'Webhook API Key', type: 'password' },
+        { key: 'polling_enabled', label: 'Polling Enabled', type: 'toggle' },
     ],
     defectdojo: [
         { key: 'enabled', label: 'Enabled', type: 'toggle' },

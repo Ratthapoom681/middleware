@@ -346,6 +346,17 @@ def wazuh_webhook():
     Wazuh sends a JSON array (or single object) of rules/alerts.
     """
     try:
+        # Load current config
+        config = load_config(str(CONFIG_PATH) if CONFIG_PATH.exists() else None)
+        
+        # Check API key if configured
+        expected_key = config.wazuh.webhook_api_key
+        if expected_key:
+            provided_key = request.headers.get("X-API-Key")
+            if provided_key != expected_key:
+                logger.warning("Unauthorized webhook attempt from %s (invalid API key)", request.remote_addr)
+                return jsonify({"status": "error", "message": "Unauthorized"}), 401
+
         data = request.get_json()
         if not data:
             return jsonify({"status": "error", "message": "No JSON payload"}), 400
@@ -353,9 +364,6 @@ def wazuh_webhook():
         # Wazuh integrations can send a dict or list
         if not isinstance(data, list):
             data = [data]
-
-        # Load current config
-        config = load_config(str(CONFIG_PATH) if CONFIG_PATH.exists() else None)
         
         # We need the WazuhClient just to reuse the parser logic
         wazuh_client = WazuhClient(config.wazuh)

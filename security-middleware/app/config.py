@@ -52,6 +52,8 @@ class WazuhConfig:
     alerts_json_path: str = ""
     min_level: int = 7
     verify_ssl: bool = False
+    webhook_api_key: str = ""
+    polling_enabled: bool = True
 
 
 @dataclass
@@ -236,6 +238,8 @@ def build_typed_configs(manager) -> dict[str, Any]:
         alerts_json_path=w.get("alerts_json_path", ""),
         min_level=int(w.get("min_level", 7)),
         verify_ssl=bool(w.get("verify_ssl", False)),
+        webhook_api_key=w.get("webhook_api_key", ""),
+        polling_enabled=bool(w.get("polling_enabled", True)),
     )
 
     defectdojo = DefectDojoConfig(

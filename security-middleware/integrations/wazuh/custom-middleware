@@ -1,0 +1,7 @@
+#!/sh
+# Wazuh Custom Integration: Shell wrapper for Security Middleware
+# Place this in /var/ossec/integrations/custom-middleware
+
+WPYTHON_BIN="framework/python/bin/python3"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
+${WPYTHON_BIN} ${SCRIPT_DIR}/custom-middleware.py "$@"

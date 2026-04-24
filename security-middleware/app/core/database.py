@@ -80,4 +80,14 @@ async def create_tables():
 
     engine = sqlalchemy.create_engine(url)
     metadata.create_all(engine)
+    
+    # Heal sequences for PostgreSQL in case of out-of-sync serials from JSON restores
+    if engine.dialect.name == "postgresql":
+        with engine.begin() as conn:
+            for table in metadata.sorted_tables:
+                try:
+                    conn.execute(sqlalchemy.text(f"SELECT setval(pg_get_serial_sequence('{table.name}', 'id'), coalesce(max(id),0) + 1, false) FROM {table.name};"))
+                except Exception:
+                    pass
+
     engine.dispose()

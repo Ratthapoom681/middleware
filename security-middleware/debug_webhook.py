@@ -40,13 +40,19 @@ MOCK_ALERT = {
 }
 
 WEBHOOK_URL = "http://127.0.0.1:5000/api/webhook/wazuh"
+API_KEY = ""  # Set this to match your webhook_api_key
 
 def main():
     logging.info(f"Sending mock alert to {WEBHOOK_URL}")
+    headers = {}
+    if API_KEY:
+        headers["X-API-Key"] = API_KEY
+        
     try:
         resp = requests.post(
             WEBHOOK_URL,
             json=MOCK_ALERT,     # Single object, not a list (matches integration behavior)
+            headers=headers,
             timeout=10
         )
         resp.raise_for_status()
