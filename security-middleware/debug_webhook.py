@@ -39,7 +39,7 @@ MOCK_ALERT = {
     "location": "/var/log/auth.log"
 }
 
-WEBHOOK_URL = "http://127.0.0.1:5000/api/webhook/wazuh"
+WEBHOOK_URL = "http://127.0.0.1:8000/api/webhook/wazuh"
 API_KEY = ""  # Set this to match your webhook_api_key
 
 def main():

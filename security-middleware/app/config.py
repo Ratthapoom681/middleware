@@ -46,14 +46,9 @@ class WazuhConfig:
     base_url: str = ""
     username: str = ""
     password: str = ""
-    indexer_url: str = ""
-    indexer_username: str = ""
-    indexer_password: str = ""
-    alerts_json_path: str = ""
     min_level: int = 7
     verify_ssl: bool = False
     webhook_api_key: str = ""
-    polling_enabled: bool = True
 
 
 @dataclass
@@ -232,14 +227,9 @@ def build_typed_configs(manager) -> dict[str, Any]:
         base_url=w.get("base_url", ""),
         username=w.get("username", ""),
         password=w.get("password", ""),
-        indexer_url=w.get("indexer_url", ""),
-        indexer_username=w.get("indexer_username", ""),
-        indexer_password=w.get("indexer_password", ""),
-        alerts_json_path=w.get("alerts_json_path", ""),
         min_level=int(w.get("min_level", 7)),
         verify_ssl=bool(w.get("verify_ssl", False)),
         webhook_api_key=w.get("webhook_api_key", ""),
-        polling_enabled=bool(w.get("polling_enabled", True)),
     )
 
     defectdojo = DefectDojoConfig(

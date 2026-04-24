@@ -126,18 +126,8 @@ class PipelineOrchestrator:
         # ── 1. Ingest ─────────────────────────────────────────────────
         all_findings = []
 
-        wazuh_cfg = self._configs["wazuh"]
-        if self._wazuh_client and wazuh_cfg.polling_enabled:
-            try:
-                wazuh_findings = await asyncio.to_thread(
-                    self._wazuh_client.fetch_alerts, lookback_minutes
-                )
-                all_findings.extend(wazuh_findings)
-                logger.info("Pipeline: fetched %d Wazuh findings (polling)", len(wazuh_findings))
-            except Exception as exc:
-                logger.error("Pipeline: Wazuh fetch failed: %s", exc)
-        elif self._wazuh_client:
-            logger.debug("Pipeline: Wazuh polling is disabled (push-model active)")
+        # Wazuh findings are now pushed via webhook (see app/webhook/routes.py)
+        # Only poll sources that don't support push yet.
 
         if self._defectdojo_client:
             try:

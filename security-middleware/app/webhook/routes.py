@@ -2,7 +2,6 @@
 
 from typing import List, Union
 from fastapi import APIRouter, Header, HTTPException, Request, BackgroundTasks
-from app.config import load_config
 from app.wazuh.client import WazuhClient
 from app.core.pipeline.orchestrator import PipelineOrchestrator
 from app.core.logger import logger

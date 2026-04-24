@@ -14,7 +14,8 @@ async def cleanup_old_data(retention_days: int = 90) -> int:
         result = await database.execute(
             table.delete().where(table.c.created_at < cutoff)
         )
-        total_deleted += result
+        if result is not None:
+            total_deleted += result
 
     logger.info("Data cleanup: removed %d records older than %d days", total_deleted, retention_days)
     return total_deleted

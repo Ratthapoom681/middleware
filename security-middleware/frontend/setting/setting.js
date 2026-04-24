@@ -9,17 +9,13 @@ let currentConfig = {};
 // Field definitions per section for auto-form generation
 const FIELD_DEFS = {
     wazuh: [
-        { key: 'base_url', label: 'Manager Base URL', type: 'url' },
+        { key: 'webhook_url', label: 'Inbound Webhook URL (Read-only)', type: 'text', readonly: true },
+        { key: 'webhook_api_key', label: 'Webhook API Key', type: 'password' },
+        { key: 'base_url', label: 'Manager Base URL (API)', type: 'url' },
         { key: 'username', label: 'Manager Username', type: 'text' },
         { key: 'password', label: 'Manager Password', type: 'password' },
-        { key: 'indexer_url', label: 'Indexer URL', type: 'url' },
-        { key: 'indexer_username', label: 'Indexer Username', type: 'text' },
-        { key: 'indexer_password', label: 'Indexer Password', type: 'password' },
-        { key: 'alerts_json_path', label: 'Alerts JSON Path', type: 'text' },
         { key: 'min_level', label: 'Min Alert Level (0-15)', type: 'number', min: 0, max: 15 },
         { key: 'verify_ssl', label: 'Verify SSL', type: 'toggle' },
-        { key: 'webhook_api_key', label: 'Webhook API Key', type: 'password' },
-        { key: 'polling_enabled', label: 'Polling Enabled', type: 'toggle' },
     ],
     defectdojo: [
         { key: 'enabled', label: 'Enabled', type: 'toggle' },
@@ -125,6 +121,12 @@ async function loadSection(section) {
     container.innerHTML = '<div class="loading-placeholder">Loading…</div>';
 
     currentConfig = await API.getSettingsSection(section);
+    
+    // Inject dynamic read-only values
+    if (section === 'wazuh') {
+        currentConfig.webhook_url = window.location.origin + '/api/webhook/wazuh';
+    }
+    
     renderForm(section, currentConfig);
 }
 
@@ -157,7 +159,8 @@ function renderForm(section, config) {
         } else if (field.type === 'number') {
             html += `<input type="number" id="f-${field.key}" value="${val ?? ''}" ${field.min !== undefined ? `min="${field.min}"` : ''} ${field.max !== undefined ? `max="${field.max}"` : ''}>`;
         } else {
-            html += `<input type="${field.type || 'text'}" id="f-${field.key}" value="${val ?? ''}">`;
+            const readonly = field.readonly ? 'readonly style="background: var(--bg-surface-secondary); cursor: not-allowed;"' : '';
+            html += `<input type="${field.type || 'text'}" id="f-${field.key}" value="${val ?? ''}" ${readonly}>`;
         }
 
         html += `</div>`;

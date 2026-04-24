@@ -251,3 +251,35 @@
 [2026-04-24 10:49:44] INFO     middleware :: Data cleanup: removed 0 records older than 90 days
 [2026-04-24 10:49:45] INFO     middleware :: Job 'pipeline_poll' triggered manually — ok
 [2026-04-24 10:58:16] INFO     middleware :: Middleware server stopped
+[2026-04-24 15:12:44] INFO     middleware :: Starting Middleware server …
+[2026-04-24 15:12:44] INFO     middleware :: Connecting to database sqlite:///./data/db/middleware.db
+[2026-04-24 15:12:44] INFO     middleware :: Database connected & tables ready
+[2026-04-24 15:12:44] INFO     middleware :: SettingsManager reloaded (10 sections)
+[2026-04-24 15:12:44] INFO     middleware :: Settings loaded into SettingsManager
+[2026-04-24 15:12:44] INFO     middleware :: Background pipeline scheduler started
+[2026-04-24 15:12:49] INFO     middleware :: Data cleanup: removed 0 records older than 90 days
+[2026-04-24 15:12:54] WARNING  middleware :: Wazuh status check failed: Request URL is missing an 'http://' or 'https://' protocol.
+[2026-04-24 16:13:38] INFO     middleware :: Middleware server stopped
+[2026-04-24 16:13:41] INFO     middleware :: Starting Middleware server …
+[2026-04-24 16:13:41] INFO     middleware :: Connecting to database sqlite:///./data/db/middleware.db
+[2026-04-24 16:13:41] INFO     middleware :: Database connected & tables ready
+[2026-04-24 16:13:41] INFO     middleware :: SettingsManager reloaded (10 sections)
+[2026-04-24 16:13:41] INFO     middleware :: Settings loaded into SettingsManager
+[2026-04-24 16:13:41] INFO     middleware :: Background pipeline scheduler started
+[2026-04-24 16:13:46] INFO     middleware :: Data cleanup: removed 0 records older than 90 days
+[2026-04-24 16:14:38] INFO     middleware :: SettingsManager reloaded (10 sections)
+[2026-04-24 16:14:38] INFO     middleware :: Settings section 'wazuh' updated and reloaded
+[2026-04-24 16:14:40] WARNING  middleware :: Wazuh status check failed: Request URL is missing an 'http://' or 'https://' protocol.
+[2026-04-24 16:14:44] WARNING  middleware :: Wazuh status check failed: Request URL is missing an 'http://' or 'https://' protocol.
+[2026-04-24 16:15:10] INFO     middleware :: SettingsManager reloaded (10 sections)
+[2026-04-24 16:15:10] INFO     middleware :: Settings section 'wazuh' updated and reloaded
+[2026-04-24 16:16:13] INFO     middleware :: SettingsManager reloaded (10 sections)
+[2026-04-24 16:16:13] INFO     middleware :: Settings section 'wazuh' updated and reloaded
+[2026-04-24 16:16:35] WARNING  middleware :: DefectDojo status check failed: Request URL is missing an 'http://' or 'https://' protocol.
+[2026-04-24 16:16:36] WARNING  middleware :: Redmine status check failed: Request URL is missing an 'http://' or 'https://' protocol.
+[2026-04-24 16:16:36] WARNING  middleware :: Redmine status check failed: Request URL is missing an 'http://' or 'https://' protocol.
+[2026-04-24 16:47:46] INFO     middleware :: SettingsManager reloaded (10 sections)
+[2026-04-24 16:47:46] INFO     middleware :: Settings section 'wazuh' updated and reloaded
+[2026-04-24 16:50:58] WARNING  middleware :: DefectDojo status check failed: Request URL is missing an 'http://' or 'https://' protocol.
+[2026-04-24 16:51:38] WARNING  middleware :: DefectDojo status check failed: Request URL is missing an 'http://' or 'https://' protocol.
+[2026-04-24 16:51:39] WARNING  middleware :: Redmine status check failed: Request URL is missing an 'http://' or 'https://' protocol.

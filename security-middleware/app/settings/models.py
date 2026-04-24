@@ -84,7 +84,6 @@ _DEFAULTS: dict[str, dict] = {
         "min_level": 7,
         "verify_ssl": False,
         "webhook_api_key": "",
-        "polling_enabled": True,
     },
     "defectdojo": {
         "enabled": False,
