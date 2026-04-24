@@ -283,3 +283,4 @@
 [2026-04-24 16:50:58] WARNING  middleware :: DefectDojo status check failed: Request URL is missing an 'http://' or 'https://' protocol.
 [2026-04-24 16:51:38] WARNING  middleware :: DefectDojo status check failed: Request URL is missing an 'http://' or 'https://' protocol.
 [2026-04-24 16:51:39] WARNING  middleware :: Redmine status check failed: Request URL is missing an 'http://' or 'https://' protocol.
+[2026-04-24 17:04:06] INFO     middleware :: Middleware server stopped
