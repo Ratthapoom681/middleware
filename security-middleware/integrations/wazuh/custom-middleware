@@ -1,7 +1,18 @@
-#!/sh
+#!/bin/sh
 # Wazuh Custom Integration: Shell wrapper for Security Middleware
 # Place this in /var/ossec/integrations/custom-middleware
 
-WPYTHON_BIN="framework/python/bin/python3"
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
-${WPYTHON_BIN} ${SCRIPT_DIR}/custom-middleware.py "$@"
+WPYTHON_BIN="/var/ossec/framework/python/bin/python3"
+SCRIPT_DIR="/var/ossec/integrations"
+
+if [ ! -f "${WPYTHON_BIN}" ]; then
+    echo "ERROR: Wazuh Python binary not found at ${WPYTHON_BIN}" >&2
+    exit 1
+fi
+
+if [ ! -f "${SCRIPT_DIR}/custom-middleware.py" ]; then
+    echo "ERROR: Integration logic script not found at ${SCRIPT_DIR}/custom-middleware.py" >&2
+    exit 1
+fi
+
+exec ${WPYTHON_BIN} ${SCRIPT_DIR}/custom-middleware.py "$@"

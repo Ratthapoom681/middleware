@@ -33,6 +33,7 @@ from app.scheduler.routes import router as scheduler_router
 from app.settings.routes import router as settings_router
 from app.data_retention.routes import router as retention_router
 from app.audit.routes import router as audit_router
+from app.webhook.routes import router as webhook_router
 
 
 def _redact_database_url(url: str) -> str:
@@ -179,6 +180,7 @@ app.include_router(scheduler_router, prefix="/api/scheduler", tags=["Scheduler"]
 app.include_router(settings_router, prefix="/api/settings", tags=["Settings"])
 app.include_router(retention_router, prefix="/api/data-retention", tags=["Data Retention"])
 app.include_router(audit_router, prefix="/api/audit", tags=["Audit"])
+app.include_router(webhook_router, prefix="/api/webhook", tags=["Webhook"])
 
 # ── Serve Frontend ──
 app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")

@@ -30,12 +30,18 @@ VERIFY_SSL = False  # Set True if middleware uses a trusted certificate
 
 
 def log(level: str, msg: str) -> None:
-    """Append a log line to the integrations log file."""
+    """Append a log line to the integrations log file and stderr."""
     timestamp = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
-    entry = f"{timestamp} custom-middleware: {level}: {msg}\n"
+    entry = f"{timestamp} custom-middleware: {level}: {msg}"
+    
+    # Print to stderr so it appears in Wazuh's ossec.log
+    sys.stderr.write(entry + "\n")
+    sys.stderr.flush()
+
+    # Log to file
     try:
         with open(LOG_FILE, "a") as f:
-            f.write(entry)
+            f.write(entry + "\n")
     except Exception:
         pass
 
@@ -79,9 +85,12 @@ def send_with_urllib(url: str, headers: dict, payload: dict) -> None:
 
 
 def main():
+    # --- Debug: log all arguments ---
+    # log("DEBUG", f"Received arguments: {sys.argv}")
+
     # --- Parse arguments ---
     if len(sys.argv) < 4:
-        log("ERROR", f"Expected 3 arguments, got {len(sys.argv) - 1}")
+        log("ERROR", f"Expected at least 3 arguments, got {len(sys.argv) - 1}. Full argv: {sys.argv}")
         sys.exit(1)
 
     alert_file_path = sys.argv[1]

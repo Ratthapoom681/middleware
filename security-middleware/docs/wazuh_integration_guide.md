@@ -11,9 +11,11 @@ On your **Wazuh Manager**, copy the integration scripts from this repository to 
 cp integrations/wazuh/custom-middleware /var/ossec/integrations/
 cp integrations/wazuh/custom-middleware.py /var/ossec/integrations/
 
-# Set permissions
+# Set permissions and ensure Unix line endings
 chown root:wazuh /var/ossec/integrations/custom-middleware*
 chmod 750 /var/ossec/integrations/custom-middleware*
+# IMPORTANT: If you edited these files on Windows, convert them to Unix format:
+# sed -i 's/\r$//' /var/ossec/integrations/custom-middleware*
 ```
 
 ## 2. Configure Wazuh Manager
@@ -64,3 +66,13 @@ systemctl restart wazuh-manager
    ```
 3. Monitor the Middleware Dashboard and Redmine for new findings.
 4. Check `/var/ossec/logs/integrations.log` on the Wazuh Manager for delivery status.
+
+## Troubleshooting
+
+### Error: "Couldn't execute command"
+If you see this in `ossec.log`, it means the integration engine failed to run your script.
+1. **Shebang**: Ensure the first line of `custom-middleware` is `#!/bin/sh` (not `#!/sh`).
+2. **Line Endings**: If you copied the file from a Windows system, it likely has `\r\n` endings. Run:
+   `sed -i 's/\r$//' /var/ossec/integrations/custom-middleware*`
+3. **Permissions**: Run `ls -l /var/ossec/integrations/custom-middleware` and ensure it is executable and owned by `root:wazuh`.
+4. **Python Path**: Verify Wazuh's Python exists at `/var/ossec/framework/python/bin/python3`.

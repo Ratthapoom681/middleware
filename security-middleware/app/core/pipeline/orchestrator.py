@@ -150,15 +150,39 @@ class PipelineOrchestrator:
                 logger.error("Pipeline: DefectDojo fetch failed: %s", exc)
 
         stats["ingested"] = len(all_findings)
+        return await self.process_batch(all_findings, stats)
 
-        if not all_findings:
-            logger.info("Pipeline: no findings ingested this cycle")
+    async def process_batch(self, findings: list[Any], stats: dict[str, Any] = None) -> dict[str, Any]:
+        """
+        Run the pipeline stages for a specific batch of findings.
+        Returns the stats of the run.
+        """
+        if not stats:
+            stats = {
+                "ingested": len(findings),
+                "filtered": 0,
+                "deduplicated": 0,
+                "new": 0,
+                "repeat": 0,
+                "created": 0,
+                "updated": 0,
+                "reopened": 0,
+                "recreated": 0,
+                "delivered": 0,
+                "failed": 0,
+            }
+        
+        if not self._initialized:
+            self.rebuild()
+
+        if not findings:
+            logger.info("Pipeline: no findings to process")
             monitor.record_run(stats)
             return stats
 
         # ── 2. Filter ────────────────────────────────────────────────
-        filtered = self._filter_stage.process(all_findings)
-        stats["filtered"] = stats["ingested"] - len(filtered)
+        filtered = self._filter_stage.process(findings)
+        stats["filtered"] += (len(findings) - len(filtered))
 
         if not filtered:
             logger.info("Pipeline: all findings were filtered out")
