@@ -1,6 +1,6 @@
 """Data retention API routes."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from app.data_retention import backup, cleanup, config
 from app.audit.models import log_action
 
@@ -17,18 +17,18 @@ async def get_status():
 
 
 @router.post("/backup")
-async def trigger_backup():
+async def trigger_backup(type: str = Query("full")):
     """Manually trigger a database backup."""
     try:
-        path = await backup.create_backup()
+        path = await backup.create_backup(backup_type=type)
 
         await log_action(
             module="data_retention",
             action="backup",
-            detail=f"Manual backup created: {path}",
+            detail=f"Manual {type} backup created: {path}",
         )
 
-        return {"status": "ok", "backup_path": path}
+        return {"status": "ok", "backup_path": path, "type": type}
     except Exception as e:
         return {"status": "error", "message": f"Backup failed: {str(e)}"}
 
@@ -38,6 +38,23 @@ async def list_backups():
     """List all available database backups."""
     backups = await backup.list_backups()
     return {"backups": backups, "count": len(backups)}
+
+
+@router.delete("/backups")
+async def delete_backups(type: str = Query("all")):
+    """Delete database backup files by type."""
+    try:
+        count = await backup.delete_all_backups(target_type=type)
+
+        await log_action(
+            module="data_retention",
+            action="backup_cleanup",
+            detail=f"Deleted {type} backups ({count} files)",
+        )
+
+        return {"status": "ok", "deleted_count": count, "type": type}
+    except Exception as e:
+        return {"status": "error", "message": f"Cleanup failed: {str(e)}"}
 
 
 @router.post("/backups/restore/{filename}")

@@ -39,6 +39,23 @@ async function loadPipelineStatus() {
     }
 }
 
+async function loadDeadLetters() {
+    const tbody = document.getElementById('dead-letter-body');
+    const deadLetters = await API.getDeadLetters();
+    if (deadLetters.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" class="loading-placeholder">No dead-letter items found</td></tr>';
+        return;
+    }
+    tbody.innerHTML = deadLetters.map(item => `
+        <tr>
+            <td><strong>${item.finding_id || '—'}</strong></td>
+            <td class="text-error" style="max-width: 300px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${item.error || ''}">${item.error || '—'}</td>
+            <td>${item.retry_count || 0}</td>
+            <td>${item.created_at ? new Date(item.created_at).toLocaleString() : '—'}</td>
+        </tr>
+    `).join('');
+}
+
 async function loadJobs() {
     const tbody = document.getElementById('jobs-body');
     const jobs = await API.getJobs();

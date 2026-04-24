@@ -138,3 +138,115 @@
 [2026-04-23 15:07:37] INFO     middleware :: Database connected & tables ready
 [2026-04-23 15:07:37] INFO     middleware :: SettingsManager reloaded (10 sections)
 [2026-04-23 15:07:37] INFO     middleware :: Settings loaded into SettingsManager
+[2026-04-24 09:53:48] INFO     middleware :: Starting Middleware server …
+[2026-04-24 09:53:48] INFO     middleware :: Connecting to database sqlite:///./data/db/middleware.db
+[2026-04-24 09:53:48] INFO     middleware :: Database connected & tables ready
+[2026-04-24 09:53:48] INFO     middleware :: SettingsManager reloaded (10 sections)
+[2026-04-24 09:53:48] INFO     middleware :: Settings loaded into SettingsManager
+[2026-04-24 09:53:48] INFO     middleware :: Background pipeline scheduler started
+[2026-04-24 09:54:10] WARNING  middleware :: Wazuh status check failed: [Errno 11001] getaddrinfo failed
+[2026-04-24 09:54:14] WARNING  middleware :: Wazuh status check failed: [Errno 11001] getaddrinfo failed
+[2026-04-24 09:54:15] WARNING  middleware :: DefectDojo status check failed: Request URL is missing an 'http://' or 'https://' protocol.
+[2026-04-24 09:54:17] WARNING  middleware :: Redmine status check failed: Request URL is missing an 'http://' or 'https://' protocol.
+[2026-04-24 09:54:17] WARNING  middleware :: Wazuh status check failed: [Errno 11001] getaddrinfo failed
+[2026-04-24 09:57:00] INFO     middleware :: SQLite backup created: data\backups\full_backup_2026-04-24_02-57-00.db
+[2026-04-24 10:00:57] INFO     middleware :: SQLite backup created: data\backups\full_backup_2026-04-24_03-00-57.db
+[2026-04-24 10:01:10] INFO     middleware :: Data cleanup: removed 0 records older than 90 days
+[2026-04-24 10:01:19] INFO     middleware :: SQLite backup created: data\backups\full_backup_2026-04-24_03-01-19.db
+[2026-04-24 10:01:22] INFO     middleware :: SQLite backup created: data\backups\full_backup_2026-04-24_03-01-22.db
+[2026-04-24 10:05:01] INFO     middleware :: Middleware server stopped
+[2026-04-24 10:05:03] INFO     middleware :: Starting Middleware server …
+[2026-04-24 10:05:03] INFO     middleware :: Connecting to database sqlite:///./data/db/middleware.db
+[2026-04-24 10:05:03] INFO     middleware :: Database connected & tables ready
+[2026-04-24 10:05:03] INFO     middleware :: SettingsManager reloaded (10 sections)
+[2026-04-24 10:05:03] INFO     middleware :: Settings loaded into SettingsManager
+[2026-04-24 10:05:03] INFO     middleware :: Background pipeline scheduler started
+[2026-04-24 10:05:42] INFO     middleware :: Middleware server stopped
+[2026-04-24 10:05:46] INFO     middleware :: Starting Middleware server …
+[2026-04-24 10:05:46] INFO     middleware :: Connecting to database sqlite:///./data/db/middleware.db
+[2026-04-24 10:05:46] INFO     middleware :: Database connected & tables ready
+[2026-04-24 10:05:46] INFO     middleware :: SettingsManager reloaded (10 sections)
+[2026-04-24 10:05:46] INFO     middleware :: Settings loaded into SettingsManager
+[2026-04-24 10:05:46] INFO     middleware :: Background pipeline scheduler started
+[2026-04-24 10:05:58] INFO     middleware :: Data cleanup: removed 0 records older than 90 days
+[2026-04-24 10:06:00] INFO     middleware :: Creating backup with type: full
+[2026-04-24 10:06:00] INFO     middleware :: SQLite backup created: data\backups\full_backup_2026-04-24_03-06-00.db
+[2026-04-24 10:06:25] INFO     middleware :: Creating backup with type: full
+[2026-04-24 10:06:25] INFO     middleware :: SQLite backup created: data\backups\full_backup_2026-04-24_03-06-25.db
+[2026-04-24 10:17:32] INFO     middleware :: SettingsManager reloaded (10 sections)
+[2026-04-24 10:17:32] INFO     middleware :: Settings section 'wazuh' updated and reloaded
+[2026-04-24 10:17:36] INFO     middleware :: Creating backup with type: full
+[2026-04-24 10:17:36] INFO     middleware :: SQLite backup created: data\backups\full_backup_2026-04-24_03-17-36.db
+[2026-04-24 10:17:39] INFO     middleware :: Creating backup with type: full
+[2026-04-24 10:17:39] INFO     middleware :: SQLite backup created: data\backups\full_backup_2026-04-24_03-17-39.db
+[2026-04-24 10:18:55] INFO     middleware :: Creating backup with type: config
+[2026-04-24 10:18:55] INFO     middleware :: Config-only backup created: data\backups\config_backup_2026-04-24_03-18-55.json
+[2026-04-24 10:19:50] INFO     middleware :: Deleted 9 backup files (type: all)
+[2026-04-24 10:22:23] INFO     middleware :: Creating backup with type: config
+[2026-04-24 10:22:23] INFO     middleware :: Config-only backup created: data\backups\config_backup_2026-04-24_03-22-23.json
+[2026-04-24 10:23:25] INFO     middleware :: Creating backup with type: config
+[2026-04-24 10:23:25] INFO     middleware :: Config-only backup created: data\backups\config_backup_2026-04-24_03-23-25.json
+[2026-04-24 10:24:27] INFO     middleware :: Deleted 2 backup files (type: all)
+[2026-04-24 10:24:30] INFO     middleware :: Creating backup with type: full
+[2026-04-24 10:24:30] INFO     middleware :: SQLite backup created: data\backups\full_backup_2026-04-24_03-24-30.db
+[2026-04-24 10:24:34] INFO     middleware :: Creating backup with type: full
+[2026-04-24 10:24:34] INFO     middleware :: SQLite backup created: data\backups\full_backup_2026-04-24_03-24-34.db
+[2026-04-24 10:24:34] INFO     middleware :: Safety backup created before restore: data\backups\full_backup_2026-04-24_03-24-34_prerestore.db
+[2026-04-24 10:24:34] INFO     middleware :: SQLite database restored from: data\backups\full_backup_2026-04-24_03-24-30.db
+[2026-04-24 10:24:34] INFO     middleware :: SettingsManager reloaded (10 sections)
+[2026-04-24 10:24:40] INFO     middleware :: Deleted 2 backup files (type: all)
+[2026-04-24 10:24:42] INFO     middleware :: Creating backup with type: config
+[2026-04-24 10:24:42] INFO     middleware :: Config-only backup created: data\backups\config_backup_2026-04-24_03-24-42.json
+[2026-04-24 10:24:49] INFO     middleware :: SettingsManager reloaded (10 sections)
+[2026-04-24 10:24:49] INFO     middleware :: Settings section 'wazuh' updated and reloaded
+[2026-04-24 10:24:54] INFO     middleware :: Creating backup with type: full
+[2026-04-24 10:24:54] INFO     middleware :: SQLite backup created: data\backups\full_backup_2026-04-24_03-24-54.db
+[2026-04-24 10:24:54] INFO     middleware :: Safety backup created before restore: data\backups\full_backup_2026-04-24_03-24-54_prerestore.db
+[2026-04-24 10:25:29] INFO     middleware :: Deleted 2 backup files (type: all)
+[2026-04-24 10:25:39] INFO     middleware :: SettingsManager reloaded (10 sections)
+[2026-04-24 10:25:39] INFO     middleware :: Settings section 'wazuh' updated and reloaded
+[2026-04-24 10:25:41] INFO     middleware :: Creating backup with type: config
+[2026-04-24 10:25:41] INFO     middleware :: Config-only backup created: data\backups\config_backup_2026-04-24_03-25-41.json
+[2026-04-24 10:25:45] INFO     middleware :: Creating backup with type: full
+[2026-04-24 10:25:45] INFO     middleware :: SQLite backup created: data\backups\full_backup_2026-04-24_03-25-45.db
+[2026-04-24 10:25:45] INFO     middleware :: Safety backup created before restore: data\backups\full_backup_2026-04-24_03-25-45_prerestore.db
+[2026-04-24 10:27:58] INFO     middleware :: Middleware server stopped
+[2026-04-24 10:28:00] INFO     middleware :: Starting Middleware server …
+[2026-04-24 10:28:00] INFO     middleware :: Connecting to database sqlite:///./data/db/middleware.db
+[2026-04-24 10:28:00] INFO     middleware :: Database connected & tables ready
+[2026-04-24 10:28:00] INFO     middleware :: SettingsManager reloaded (10 sections)
+[2026-04-24 10:28:00] INFO     middleware :: Settings loaded into SettingsManager
+[2026-04-24 10:28:00] INFO     middleware :: Background pipeline scheduler started
+[2026-04-24 10:38:32] INFO     middleware :: Deleted 2 backup files (type: all)
+[2026-04-24 10:38:44] INFO     middleware :: Creating backup with type: config
+[2026-04-24 10:38:44] INFO     middleware :: Config-only backup created: data\backups\config_backup_2026-04-24_03-38-44.json
+[2026-04-24 10:38:50] INFO     middleware :: SettingsManager reloaded (10 sections)
+[2026-04-24 10:38:50] INFO     middleware :: Settings section 'wazuh' updated and reloaded
+[2026-04-24 10:38:53] INFO     middleware :: Creating backup with type: full
+[2026-04-24 10:38:53] INFO     middleware :: SQLite backup created: data\backups\full_backup_2026-04-24_03-38-53.db
+[2026-04-24 10:38:53] INFO     middleware :: Safety backup created before restore: data\backups\full_backup_2026-04-24_03-38-53_prerestore.db
+[2026-04-24 10:38:54] INFO     middleware :: Database restored from JSON export: data\backups\config_backup_2026-04-24_03-38-44.json
+[2026-04-24 10:38:54] INFO     middleware :: SettingsManager reloaded (10 sections)
+[2026-04-24 10:41:57] WARNING  middleware :: DefectDojo status check failed: Request URL is missing an 'http://' or 'https://' protocol.
+[2026-04-24 10:41:59] WARNING  middleware :: Redmine status check failed: Request URL is missing an 'http://' or 'https://' protocol.
+[2026-04-24 10:46:50] INFO     middleware :: Middleware server stopped
+[2026-04-24 10:46:52] INFO     middleware :: Starting Middleware server …
+[2026-04-24 10:46:52] INFO     middleware :: Connecting to database sqlite:///./data/db/middleware.db
+[2026-04-24 10:46:52] INFO     middleware :: Database connected & tables ready
+[2026-04-24 10:46:52] INFO     middleware :: SettingsManager reloaded (10 sections)
+[2026-04-24 10:46:52] INFO     middleware :: Settings loaded into SettingsManager
+[2026-04-24 10:46:52] INFO     middleware :: Background pipeline scheduler started
+[2026-04-24 10:46:53] INFO     middleware :: Job 'pipeline_poll' triggered manually — ok
+[2026-04-24 10:46:57] INFO     middleware :: Data cleanup: removed 0 records older than 90 days
+[2026-04-24 10:47:08] INFO     middleware :: Job 'pipeline_poll' triggered manually — ok
+[2026-04-24 10:47:13] INFO     middleware :: Job 'pipeline_poll' triggered manually — ok
+[2026-04-24 10:49:30] INFO     middleware :: Job 'pipeline_poll' triggered manually — ok
+[2026-04-24 10:49:35] INFO     middleware :: Middleware server stopped
+[2026-04-24 10:49:39] INFO     middleware :: Starting Middleware server …
+[2026-04-24 10:49:39] INFO     middleware :: Connecting to database sqlite:///./data/db/middleware.db
+[2026-04-24 10:49:39] INFO     middleware :: Database connected & tables ready
+[2026-04-24 10:49:39] INFO     middleware :: SettingsManager reloaded (10 sections)
+[2026-04-24 10:49:39] INFO     middleware :: Settings loaded into SettingsManager
+[2026-04-24 10:49:39] INFO     middleware :: Background pipeline scheduler started
+[2026-04-24 10:49:44] INFO     middleware :: Data cleanup: removed 0 records older than 90 days
+[2026-04-24 10:49:45] INFO     middleware :: Job 'pipeline_poll' triggered manually — ok

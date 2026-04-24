@@ -1,0 +1,10 @@
+{
+  "settings": [
+    {
+      "id": 1,
+      "section": "wazuh",
+      "config_json": "{\"base_url\": \"ds\", \"username\": \"admin\", \"password\": \"secret\", \"indexer_url\": \"\", \"indexer_username\": \"\", \"indexer_password\": \"\", \"alerts_json_path\": \"\", \"min_level\": 7, \"verify_ssl\": false}",
+      "updated_at": "2026-04-24T03:25:39.367671"
+    }
+  ]
+}

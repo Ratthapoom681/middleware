@@ -147,8 +147,11 @@ const API = {
     },
 
     // ── Data Retention ──
-    async triggerBackup() {
-        return await this.request('/data-retention/backup', { method: 'POST' });
+    async triggerBackup(type = 'full') {
+        return await this.request(`/data-retention/backup?type=${type}`, { method: 'POST' });
+    },
+    async deleteBackups(type = 'all') {
+        return await this.request(`/data-retention/backups?type=${type}`, { method: 'DELETE' });
     },
     async triggerCleanup(days = 90) {
         return await this.request(`/data-retention/cleanup?retention_days=${days}`, { method: 'POST' });

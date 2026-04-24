@@ -211,17 +211,36 @@ async function saveCurrentSection() {
     }
 }
 
-async function doBackup() {
+async function doBackup(type = 'full') {
     try {
-        const res = await API.triggerBackup();
+        const res = await API.triggerBackup(type);
         if (res.status === 'ok') {
-            COMPONENTS.toast(`Backup created: ${res.backup_path}`, 'success');
+            const label = type === 'config' ? 'Config' : 'Full';
+            COMPONENTS.toast(`${label} backup created: ${res.backup_path}`, 'success');
             loadBackups();
         } else {
             COMPONENTS.toast(res.message || 'Backup failed', 'error');
         }
     } catch (e) {
         COMPONENTS.toast(`Backup failed: ${e.message}`, 'error');
+    }
+}
+
+async function doDeleteBackups() {
+    const type = document.getElementById('cleanup-type')?.value || 'all';
+    const label = type === 'all' ? 'ALL' : type === 'config' ? 'all Config' : 'all Full';
+    
+    if (!confirm(`Are you sure you want to delete ${label} backup files?\n\nThis action cannot be undone.`)) return;
+    try {
+        const res = await API.deleteBackups(type);
+        if (res.status === 'ok') {
+            COMPONENTS.toast(`Deleted ${res.deleted_count} backup files`, 'success');
+            loadBackups();
+        } else {
+            COMPONENTS.toast(res.message || 'Cleanup failed', 'error');
+        }
+    } catch (e) {
+        COMPONENTS.toast(`Cleanup failed: ${e.message}`, 'error');
     }
 }
 
@@ -296,6 +315,7 @@ async function restoreBackup(filename) {
 window.saveCurrentSection = saveCurrentSection;
 window.doBackup = doBackup;
 window.doCleanup = doCleanup;
+window.doDeleteBackups = doDeleteBackups;
 window.loadBackups = loadBackups;
 window.restoreBackup = restoreBackup;
 

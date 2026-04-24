@@ -48,13 +48,18 @@ def _ensure_backup_dir() -> str:
 
 
 def _timestamp() -> str:
-    return datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d_%H-%M-%S")
 
 
 # ── Create ───────────────────────────────────────────────────────────
 
-async def create_backup() -> str:
+async def create_backup(backup_type: str = "full") -> str:
     """Create a database backup. Strategy depends on the active backend."""
+    logger.info("Creating backup with type: %s", backup_type)
+
+    if backup_type == "config":
+        return await _create_config_json_backup()
+
     if _is_postgres():
         return await _create_pg_backup()
     return await _create_sqlite_backup()
@@ -67,7 +72,7 @@ async def _create_sqlite_backup() -> str:
         raise FileNotFoundError(f"SQLite database not found at: {db_path}")
 
     _ensure_backup_dir()
-    backup_path = os.path.join(BACKUP_DIR, f"middleware_{_timestamp()}.db")
+    backup_path = os.path.join(BACKUP_DIR, f"full_backup_{_timestamp()}.db")
     shutil.copy2(db_path, backup_path)
 
     logger.info("SQLite backup created: %s", backup_path)
@@ -84,7 +89,7 @@ async def _create_pg_backup() -> str:
 
     # Try pg_dump first
     parts = _pg_connection_parts()
-    backup_path = os.path.join(BACKUP_DIR, f"middleware_{_timestamp()}.sql")
+    backup_path = os.path.join(BACKUP_DIR, f"full_backup_{_timestamp()}.sql")
 
     env = os.environ.copy()
     env["PGPASSWORD"] = parts["password"]
@@ -129,7 +134,7 @@ async def _create_pg_json_backup() -> str:
     from app.core.database import metadata as app_metadata
 
     _ensure_backup_dir()
-    backup_path = os.path.join(BACKUP_DIR, f"middleware_{_timestamp()}.json")
+    backup_path = os.path.join(BACKUP_DIR, f"full_backup_{_timestamp()}.json")
 
     engine = sqlalchemy.create_engine(settings.DATABASE_URL)
     data: dict[str, list[dict]] = {}
@@ -149,6 +154,39 @@ async def _create_pg_json_backup() -> str:
         json.dump(data, f, indent=2, ensure_ascii=False, default=str)
 
     logger.info("PostgreSQL backup created (JSON export): %s", backup_path)
+    return backup_path
+
+
+async def _create_config_json_backup() -> str:
+    """Export only the settings table to a JSON file using SQLAlchemy."""
+    import sqlalchemy
+    from app.core.database import metadata as app_metadata
+
+    _ensure_backup_dir()
+    backup_path = os.path.join(BACKUP_DIR, f"config_backup_{_timestamp()}.json")
+
+    engine = sqlalchemy.create_engine(settings.DATABASE_URL)
+    data: dict[str, list[dict]] = {}
+
+    try:
+        with engine.connect() as conn:
+            # We specifically only target the 'settings' table
+            table = app_metadata.tables.get("settings")
+            if table is not None:
+                rows = conn.execute(table.select()).fetchall()
+                data[table.name] = [
+                    {col.name: _serialise(row._mapping[col.name]) for col in table.columns}
+                    for row in rows
+                ]
+            else:
+                logger.warning("Settings table not found in metadata during config backup")
+    finally:
+        engine.dispose()
+
+    with open(backup_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False, default=str)
+
+    logger.info("Config-only backup created: %s", backup_path)
     return backup_path
 
 
@@ -183,6 +221,38 @@ async def list_backups() -> list[dict]:
 
     backups.sort(key=lambda b: b["created_at"], reverse=True)
     return backups
+
+
+async def delete_all_backups(target_type: str = "all") -> int:
+    """
+    Delete database backup files in the backup directory.
+    target_type: "all", "full", or "config"
+    """
+    if not os.path.isdir(BACKUP_DIR):
+        return 0
+
+    count = 0
+    prefix_map = {
+        "full": "full_backup_",
+        "config": "config_backup_",
+    }
+    prefix = prefix_map.get(target_type)
+
+    for filename in os.listdir(BACKUP_DIR):
+        if filename.endswith(BACKUP_EXTENSIONS):
+            # If target_type is not "all", check the prefix
+            if prefix and not filename.startswith(prefix):
+                continue
+
+            filepath = os.path.join(BACKUP_DIR, filename)
+            try:
+                os.remove(filepath)
+                count += 1
+            except Exception as e:
+                logger.error("Failed to delete backup %s: %s", filename, e)
+
+    logger.info("Deleted %d backup files (type: %s)", count, target_type)
+    return count
 
 
 # ── Restore ──────────────────────────────────────────────────────────
@@ -302,6 +372,18 @@ async def _restore_pg_json(backup_path: str):
             for table in app_metadata.sorted_tables:
                 rows = data.get(table.name, [])
                 if rows:
+                    # Convert ISO strings back to datetime objects for relevant columns
+                    dt_cols = [c.name for c in table.columns if isinstance(c.type, (sqlalchemy.DateTime, sqlalchemy.Date))]
+                    if dt_cols:
+                        for row in rows:
+                            for col in dt_cols:
+                                if row.get(col) and isinstance(row[col], str):
+                                    try:
+                                        # Use fromisoformat for speed, falls back to str if invalid
+                                        row[col] = datetime.fromisoformat(row[col].replace('Z', '+00:00'))
+                                    except (ValueError, TypeError):
+                                        pass
+
                     conn.execute(table.insert(), rows)
     finally:
         engine.dispose()
