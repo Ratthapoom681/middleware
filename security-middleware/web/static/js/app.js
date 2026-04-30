@@ -1188,7 +1188,21 @@ async function loadDetectionAlerts() {
             else if (isAck) statusBadge = '<span class="det-badge status-ack">Acknowledged</span>';
             else statusBadge = '<span class="det-badge status-new">New</span>';
 
+            const redmineIssueId = alert.redmine_issue_id || null;
+            const redmineExists = alert.redmine_issue_exists;
+            const redmineStatus = alert.redmine_issue_status || (redmineIssueId ? 'unknown' : 'not linked');
+            let redmineHtml = '';
+            if (redmineIssueId) {
+                const issueState = redmineExists === 0 ? 'missing' : redmineStatus;
+                redmineHtml = ` &bull; Redmine #${escapeHtml(String(redmineIssueId))}: ${escapeHtml(String(issueState))}`;
+            } else if (alert.redmine_issue_status) {
+                redmineHtml = ` &bull; Redmine: ${escapeHtml(String(alert.redmine_issue_status))}`;
+            }
+
             let actionsHtml = '';
+            if (redmineIssueId) {
+                actionsHtml += `<button class="btn btn-sm" onclick="checkDetectionAlertRedmine('${alert.id}')">Check Redmine</button>`;
+            }
             if (!isResolved) {
                 actionsHtml += `<button class="btn btn-sm btn-success" onclick="resolveDetectionAlert('${alert.id}')">&#10003; Resolve</button>`;
                 if (!isAck) {
@@ -1207,7 +1221,7 @@ async function loadDetectionAlerts() {
                     <div class="detection-alert-desc">${escapeHtml(alert.description)}</div>
                     <div class="detection-alert-evidence">${escapeHtml(JSON.stringify(alert.evidence, null, 2))}</div>
                     <div class="detection-alert-footer">
-                        <div>Triggered: ${dateStr} &bull; ID: <span style="font-family:'JetBrains Mono', monospace">${alert.id.substring(0,8)}</span></div>
+                        <div>Triggered: ${dateStr} &bull; ID: <span style="font-family:'JetBrains Mono', monospace">${alert.id.substring(0,8)}</span>${redmineHtml}</div>
                         <div class="detection-alert-actions">${actionsHtml}</div>
                     </div>
                 </div>
@@ -1216,6 +1230,21 @@ async function loadDetectionAlerts() {
 
     } catch (e) {
         feed.innerHTML = `<div style="text-align:center; padding: 20px; color:var(--red);">Failed to load alerts: ${e.message}</div>`;
+    }
+}
+
+async function checkDetectionAlertRedmine(id) {
+    try {
+        const res = await fetch(`/api/detection/alerts/${id}/check-redmine`, { method: 'POST' });
+        const data = await res.json();
+        if (data.status === 'ok') {
+            toast(data.message || 'Redmine issue checked', 'success');
+            loadDetectionAlerts();
+        } else {
+            toast('Error: ' + data.message, 'error');
+        }
+    } catch (e) {
+        toast('Network error', 'error');
     }
 }
 

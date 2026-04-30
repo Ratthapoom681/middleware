@@ -30,6 +30,7 @@ from src.main import MiddlewarePipeline
 from src.state_store import create_state_store
 from src.sources.wazuh_client import WazuhClient
 from src.pipeline.detection_store import DetectionAlertStore
+from src.output.redmine_client import RedmineClient
 
 from src.config import (
     AppConfig,
@@ -502,6 +503,58 @@ def resolve_detection_alert(alert_id: str):
         else:
             return jsonify({"status": "error", "message": "Alert not found"}), 404
     except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route("/api/detection/alerts/<alert_id>/check-redmine", methods=["POST"])
+def check_detection_alert_redmine(alert_id: str):
+    """Check whether the Redmine issue linked to a detection alert still exists."""
+    try:
+        config = load_config(str(CONFIG_PATH) if CONFIG_PATH.exists() else None)
+        store = DetectionAlertStore(db_path=config.pipeline.detection.db_path)
+        try:
+            alert = store.get_alert_by_id(alert_id)
+            if not alert:
+                return jsonify({"status": "error", "message": "Alert not found"}), 404
+
+            issue_id = alert.get("redmine_issue_id")
+            if not issue_id:
+                return jsonify({
+                    "status": "ok",
+                    "message": "No Redmine issue is linked to this detection alert",
+                    "redmine": {"exists": None, "issue_id": None, "status": "not_linked"},
+                    "alert": alert,
+                })
+
+            redmine_status = RedmineClient(config.redmine).check_issue(int(issue_id))
+            exists = bool(redmine_status.get("exists"))
+            is_closed = bool(redmine_status.get("is_closed")) if redmine_status.get("is_closed") is not None else False
+            local_resolved = (not exists) or is_closed
+            store.update_redmine_issue(
+                alert_id,
+                issue_id=int(issue_id),
+                exists=exists,
+                status=str(redmine_status.get("status") or ("open" if exists else "deleted")),
+                resolved=local_resolved,
+            )
+            updated_alert = store.get_alert_by_id(alert_id)
+        finally:
+            store.close()
+
+        message = "Redmine issue exists"
+        if not exists:
+            message = "Redmine issue is missing; detection alert marked resolved"
+        elif is_closed:
+            message = "Redmine issue is closed; detection alert marked resolved"
+
+        return jsonify({
+            "status": "ok",
+            "message": message,
+            "redmine": redmine_status,
+            "alert": updated_alert,
+        })
+    except Exception as e:
+        logger.exception("Failed to check Redmine issue for detection alert")
         return jsonify({"status": "error", "message": str(e)}), 500
 
 

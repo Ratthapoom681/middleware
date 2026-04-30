@@ -11,6 +11,7 @@ import json
 import logging
 import sqlite3
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -29,6 +30,10 @@ CREATE TABLE IF NOT EXISTS detection_alerts (
     acknowledged INTEGER NOT NULL DEFAULT 0,
     resolved INTEGER NOT NULL DEFAULT 0,
     create_ticket INTEGER NOT NULL DEFAULT 0,
+    redmine_issue_id INTEGER,
+    redmine_issue_exists INTEGER,
+    redmine_issue_status TEXT,
+    redmine_checked_at TEXT,
     created_epoch REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_detection_triggered_at ON detection_alerts(triggered_at);
@@ -75,8 +80,26 @@ class DetectionAlertStore:
         self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
+        self._migrate_schema()
         self._conn.commit()
         logger.info("Detection alert store initialized at %s", db_path)
+
+    def _migrate_schema(self) -> None:
+        """Apply additive migrations for existing SQLite databases."""
+        if not self._conn:
+            return
+
+        cursor = self._conn.execute("PRAGMA table_info(detection_alerts)")
+        existing = {row["name"] for row in cursor.fetchall()}
+        migrations = {
+            "redmine_issue_id": "ALTER TABLE detection_alerts ADD COLUMN redmine_issue_id INTEGER",
+            "redmine_issue_exists": "ALTER TABLE detection_alerts ADD COLUMN redmine_issue_exists INTEGER",
+            "redmine_issue_status": "ALTER TABLE detection_alerts ADD COLUMN redmine_issue_status TEXT",
+            "redmine_checked_at": "ALTER TABLE detection_alerts ADD COLUMN redmine_checked_at TEXT",
+        }
+        for column, statement in migrations.items():
+            if column not in existing:
+                self._conn.execute(statement)
 
     def save_alert(self, alert: Any) -> None:
         """Persist a detection alert."""
@@ -90,8 +113,8 @@ class DetectionAlertStore:
             """
             INSERT OR REPLACE INTO detection_alerts
             (id, rule_name, rule_type, severity, description, evidence, source_events,
-             triggered_at, acknowledged, resolved, create_ticket, created_epoch)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             triggered_at, acknowledged, resolved, create_ticket, redmine_issue_status, created_epoch)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 alert.id,
@@ -105,6 +128,7 @@ class DetectionAlertStore:
                 int(alert.acknowledged),
                 int(alert.resolved),
                 int(alert.create_ticket),
+                "ticket_pending" if alert.create_ticket else "ticket_disabled",
                 time.time(),
             ),
         )
@@ -113,6 +137,43 @@ class DetectionAlertStore:
             "Detection: alert persisted — rule='%s' severity=%s id=%s",
             alert.rule_name, alert.severity, alert.id,
         )
+
+    def update_redmine_issue(
+        self,
+        alert_id: str,
+        *,
+        issue_id: int | None,
+        exists: bool | None,
+        status: str | None,
+        resolved: bool | None = None,
+    ) -> bool:
+        """Update Redmine linkage/status for a detection alert."""
+        if not self._conn:
+            return False
+
+        assignments = [
+            "redmine_issue_id = ?",
+            "redmine_issue_exists = ?",
+            "redmine_issue_status = ?",
+            "redmine_checked_at = ?",
+        ]
+        params: list[Any] = [
+            issue_id,
+            None if exists is None else int(exists),
+            status,
+            datetime.now(timezone.utc).isoformat(),
+        ]
+        if resolved is not None:
+            assignments.extend(["resolved = ?", "acknowledged = ?"])
+            params.extend([int(resolved), int(resolved)])
+
+        params.append(alert_id)
+        cursor = self._conn.execute(
+            f"UPDATE detection_alerts SET {', '.join(assignments)} WHERE id = ?",
+            params,
+        )
+        self._conn.commit()
+        return cursor.rowcount > 0
 
     def save_rule_event(
         self,
@@ -394,6 +455,8 @@ class DetectionAlertStore:
         d["acknowledged"] = bool(d.get("acknowledged", 0))
         d["resolved"] = bool(d.get("resolved", 0))
         d["create_ticket"] = bool(d.get("create_ticket", 0))
+        if d.get("redmine_issue_exists") is not None:
+            d["redmine_issue_exists"] = bool(d["redmine_issue_exists"])
         return d
 
     def close(self) -> None:

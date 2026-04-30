@@ -173,3 +173,54 @@ def test_wazuh_issue_description_uses_readable_sections_and_keeps_raw_data():
     assert "h3. Detection Context" in description
     assert "udp_dst_session" in description
     assert "h3. Raw Alert Data" in description
+
+
+@responses.activate
+def test_check_issue_reports_missing_redmine_issue():
+    client = RedmineClient(
+        RedmineConfig(
+            base_url="http://redmine-test",
+            api_key="test-key",
+            project_id="security-incidents",
+            tracker_id=1,
+        )
+    )
+
+    responses.add(
+        responses.GET,
+        "http://redmine-test/issues/404.json",
+        status=404,
+    )
+
+    assert client.check_issue(404) == {
+        "exists": False,
+        "issue_id": 404,
+        "status": "deleted",
+        "is_closed": None,
+    }
+
+
+@responses.activate
+def test_check_issue_reports_existing_redmine_issue_status():
+    client = RedmineClient(
+        RedmineConfig(
+            base_url="http://redmine-test",
+            api_key="test-key",
+            project_id="security-incidents",
+            tracker_id=1,
+        )
+    )
+
+    responses.add(
+        responses.GET,
+        "http://redmine-test/issues/77.json",
+        json={"issue": {"id": 77, "status": {"name": "Closed", "is_closed": True}}},
+        status=200,
+    )
+
+    assert client.check_issue(77) == {
+        "exists": True,
+        "issue_id": 77,
+        "status": "Closed",
+        "is_closed": True,
+    }

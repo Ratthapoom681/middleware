@@ -4,8 +4,12 @@ Tests for the configuration web UI and API surface.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
+import responses
 import yaml
 
+from src.pipeline.detection_store import DetectionAlertStore
 from src.sources.defectdojo_client import DefectDojoClient
 from web import server
 
@@ -412,3 +416,75 @@ def test_wazuh_webhook_processes_payload_through_pipeline(workspace_tmp_dir, mon
         "source_counts": {"wazuh": 1},
     }
     assert captured["closed"] is True
+
+
+@responses.activate
+def test_detection_alert_check_redmine_marks_missing_issue_resolved(workspace_tmp_dir, monkeypatch):
+    config_path = workspace_tmp_dir / "config.yaml"
+    detection_db = workspace_tmp_dir / "detection_alerts.db"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "redmine": {
+                    "base_url": "http://redmine-test",
+                    "api_key": "test-key",
+                    "project_id": "security-incidents",
+                    "tracker_id": 1,
+                },
+                "pipeline": {
+                    "detection": {
+                        "enabled": True,
+                        "db_path": str(detection_db),
+                    }
+                },
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(server, "CONFIG_PATH", config_path)
+
+    store = DetectionAlertStore(db_path=str(detection_db))
+    try:
+        store.save_alert(
+            SimpleNamespace(
+                id="alert-1",
+                rule_name="Brute Force Login Detection",
+                rule_type="brute_force",
+                severity="high",
+                description="Brute force detected",
+                evidence={"source_ip": "10.0.0.50"},
+                source_events=[],
+                triggered_at="2026-04-30T01:00:00+00:00",
+                acknowledged=False,
+                resolved=False,
+                create_ticket=True,
+            )
+        )
+        assert store.update_redmine_issue(
+            "alert-1",
+            issue_id=501,
+            exists=True,
+            status="open",
+            resolved=False,
+        )
+    finally:
+        store.close()
+
+    responses.add(
+        responses.GET,
+        "http://redmine-test/issues/501.json",
+        status=404,
+    )
+
+    with server.app.test_client() as client:
+        response = client.post("/api/detection/alerts/alert-1/check-redmine")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["status"] == "ok"
+    assert payload["redmine"]["exists"] is False
+    assert payload["alert"]["resolved"] is True
+    assert payload["alert"]["acknowledged"] is True
+    assert payload["alert"]["redmine_issue_exists"] is False
+    assert payload["alert"]["redmine_issue_status"] == "deleted"

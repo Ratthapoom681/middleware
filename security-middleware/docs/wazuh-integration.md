@@ -20,6 +20,18 @@ sudo chmod 750 /var/ossec/integrations/custom-security-middleware
 
 If the repository is not present on the Wazuh manager, copy only the `integrations/custom-security-middleware` file there first.
 
+For local simulation from the repository path, either make the repo copy executable too:
+
+```bash
+chmod +x integrations/custom-security-middleware
+```
+
+or call it through Python:
+
+```bash
+python3 integrations/custom-security-middleware /path/to/alert.json "" http://MIDDLEWARE_HOST:5000/api/webhook/wazuh
+```
+
 ## Configure ossec.conf
 
 Edit `/var/ossec/etc/ossec.conf` and add this inside an `<ossec_config>` block:

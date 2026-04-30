@@ -188,6 +188,22 @@ class RedmineClient:
         response.raise_for_status()
         return response.json().get("issue")
 
+    def check_issue(self, issue_id: int) -> dict[str, Any]:
+        """Return a compact existence/status check for a Redmine issue ID."""
+        issue = self._get_issue(issue_id)
+        if not issue:
+            return {"exists": False, "issue_id": issue_id, "status": "deleted", "is_closed": None}
+
+        status = issue.get("status", {}) or {}
+        status_name = str(status.get("name") or "open")
+        is_closed = bool(status.get("is_closed", False))
+        return {
+            "exists": True,
+            "issue_id": issue_id,
+            "status": status_name,
+            "is_closed": is_closed,
+        }
+
     def _evaluate_routing(self, finding: Finding) -> tuple[int, bool, Optional[int]]:
         """Evaluate routing rules to determine tracker and parent configuration."""
         for rule in self.config.routing_rules:

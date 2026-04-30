@@ -331,6 +331,9 @@ def test_detection_alert_ticket_created_while_raw_wazuh_failures_are_filtered(co
     stored_alerts = pipeline.detection_store.get_alerts(rule_type="brute_force")
     assert len(stored_alerts) == 1
     assert stored_alerts[0]["evidence"]["attempt_count"] == 5
+    assert stored_alerts[0]["redmine_issue_id"] == 501
+    assert stored_alerts[0]["redmine_issue_exists"] is True
+    assert stored_alerts[0]["redmine_issue_status"] == "open"
     assert pipeline.detection_store.count_wazuh_events() == 5
     assert pipeline.detection_store.count_rule_events(
         "Brute Force Login Detection",

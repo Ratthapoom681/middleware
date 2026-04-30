@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import errno
 import json
 import subprocess
 import sys
@@ -140,7 +141,13 @@ def invoke_integration(script: Path, alert_path: Path, api_key: str, url: str) -
         command = [sys.executable, str(script), str(alert_path), api_key, url]
     else:
         command = [str(script), str(alert_path), api_key, url]
-    return subprocess.run(command, text=True, capture_output=True, check=False)
+    try:
+        return subprocess.run(command, text=True, capture_output=True, check=False)
+    except PermissionError as exc:
+        if exc.errno != errno.EACCES:
+            raise
+        fallback = [sys.executable, str(script), str(alert_path), api_key, url]
+        return subprocess.run(fallback, text=True, capture_output=True, check=False)
 
 
 def main() -> int:

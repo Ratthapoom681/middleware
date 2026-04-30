@@ -371,8 +371,11 @@ class MiddlewarePipeline:
             logger.info("--- Queueing findings for async Redmine delivery ---")
             planned_jobs = self._plan_async_redmine_jobs(new_findings, repeat_findings)
             queue_stats = self._enqueue_redmine_jobs(planned_jobs)
+            if queue_stats.get("queued", 0):
+                self._mark_detection_ticket_status(detection_ticket_findings, status="queued")
         else:
             sync_stats, successful_new, successful_repeat = self._deliver_findings(new_findings, repeat_findings)
+            self._sync_detection_redmine_metadata(detection_ticket_findings)
 
         stats = {
             "created": sync_stats.get("created", 0),
@@ -476,6 +479,55 @@ class MiddlewarePipeline:
                     logger.error("Detection: failed to persist raw Wazuh event %s: %s", finding.source_id, exc)
         if stored:
             logger.info("Detection: persisted %d raw Wazuh webhook event(s)", stored)
+
+    def _sync_detection_redmine_metadata(self, findings: list[Finding]) -> None:
+        """Copy Redmine issue metadata from ticketed detection findings back to detection alerts."""
+        if not self.detection_store or not hasattr(self.detection_store, "update_redmine_issue"):
+            return
+
+        for finding in findings:
+            alert_id = finding.enrichment.get("detection_alert_id")
+            if not alert_id:
+                continue
+            try:
+                if finding.redmine_issue_id:
+                    self.detection_store.update_redmine_issue(
+                        str(alert_id),
+                        issue_id=int(finding.redmine_issue_id),
+                        exists=True,
+                        status=finding.issue_state or "open",
+                        resolved=False,
+                    )
+                else:
+                    self.detection_store.update_redmine_issue(
+                        str(alert_id),
+                        issue_id=None,
+                        exists=None,
+                        status="ticket_failed",
+                        resolved=False,
+                    )
+            except Exception as exc:
+                logger.error("Detection: failed to update Redmine metadata for alert %s: %s", alert_id, exc)
+
+    def _mark_detection_ticket_status(self, findings: list[Finding], status: str) -> None:
+        """Mark ticketable detection findings with a non-final delivery status."""
+        if not self.detection_store or not hasattr(self.detection_store, "update_redmine_issue"):
+            return
+
+        for finding in findings:
+            alert_id = finding.enrichment.get("detection_alert_id")
+            if not alert_id:
+                continue
+            try:
+                self.detection_store.update_redmine_issue(
+                    str(alert_id),
+                    issue_id=getattr(finding, "redmine_issue_id", None),
+                    exists=None,
+                    status=status,
+                    resolved=False,
+                )
+            except Exception as exc:
+                logger.error("Detection: failed to mark ticket status for alert %s: %s", alert_id, exc)
 
     def _is_raw_wazuh_finding(self, finding: Finding) -> bool:
         """Raw Wazuh findings are rule input; detection-generated Wazuh findings may ticket."""
