@@ -6,7 +6,6 @@ const defectDojoScopeData = {
     engagements: [],
     tests: [],
 };
-let latestWebhookHistory = [];
 const JSON_RULE_EXAMPLES = {
     fortigate: [
         {
@@ -62,8 +61,8 @@ const sectionTitles = {
     filter:     'Filter Rules',
     dedup:      'Deduplication',
     enrichment: 'Enrichment',
-    dashboard:  'Operations Dashboard',
-    live:       'Live Events Queue',
+    'detection-rules': 'Detection Rules',
+    'detection-alerts': 'Detection Alerts',
     logging:    'Logging',
     preview:    'YAML Preview',
 };
@@ -77,8 +76,25 @@ document.querySelectorAll('.nav-item[data-section]').forEach(item => {
         document.getElementById('page-' + section).classList.add('active');
         document.getElementById('section-title').textContent = sectionTitles[section] || section;
         if (section === 'preview') updateYamlPreview();
+        if (section === 'detection-alerts') loadDetectionAlerts();
+        if (window.innerWidth <= 768) toggleSidebar(false);
     });
 });
+
+function toggleSidebar(forceState) {
+    const sidebar = document.querySelector('.sidebar');
+    const overlay = document.getElementById('sidebar-overlay');
+    const isMobile = window.innerWidth <= 768;
+    const isOpen = sidebar.classList.contains('open');
+    const shouldOpen = typeof forceState === 'boolean' ? forceState : !isOpen;
+    if (shouldOpen) {
+        sidebar.classList.add('open');
+        if (isMobile) overlay.classList.add('open');
+    } else {
+        sidebar.classList.remove('open');
+        overlay.classList.remove('open');
+    }
+}
 
 // ── Chip (tag) Input ───────────────────────────────────────────
 document.querySelectorAll('.chip-container').forEach(container => {
@@ -175,11 +191,7 @@ function populateForm(c) {
     setVal('wazuh-base_url', c.wazuh?.base_url);
     setVal('wazuh-username', c.wazuh?.username);
     setVal('wazuh-password', c.wazuh?.password);
-    setVal('wazuh-indexer_url', c.wazuh?.indexer_url);
-    setVal('wazuh-indexer_username', c.wazuh?.indexer_username);
-    setVal('wazuh-indexer_password', c.wazuh?.indexer_password);
     setVal('wazuh-min_level', c.wazuh?.min_level);
-    setVal('wazuh-alerts_json_path', c.wazuh?.alerts_json_path);
     setChecked('wazuh-verify_ssl', c.wazuh?.verify_ssl);
 
     // DefectDojo
@@ -237,6 +249,16 @@ function populateForm(c) {
     setChecked('enrichment-asset_inventory_enabled', c.pipeline?.enrichment?.asset_inventory_enabled);
     setChecked('enrichment-add_remediation_links', c.pipeline?.enrichment?.add_remediation_links);
     setVal('enrichment-asset_inventory_path', c.pipeline?.enrichment?.asset_inventory_path);
+
+    // Detection
+    setChecked('detection-enabled', c.pipeline?.detection?.enabled);
+    setVal('detection-alert_ttl_hours', c.pipeline?.detection?.alert_ttl_hours);
+    setVal('detection-max_state_entries', c.pipeline?.detection?.max_state_entries);
+    setVal('detection-db_path', c.pipeline?.detection?.db_path);
+    if (c.pipeline?.detection?.rules) {
+        localDetectionRules = JSON.parse(JSON.stringify(c.pipeline.detection.rules));
+        if (typeof renderDetectionRules === 'function') renderDetectionRules();
+    }
 
     // Logging
     setVal('storage-backend', c.storage?.backend || 'local');
@@ -307,10 +329,6 @@ function collectForm() {
             base_url:         getVal('wazuh-base_url'),
             username:         getVal('wazuh-username'),
             password:         getVal('wazuh-password'),
-            indexer_url:      getVal('wazuh-indexer_url'),
-            indexer_username: getVal('wazuh-indexer_username'),
-            indexer_password: getVal('wazuh-indexer_password'),
-            alerts_json_path: getVal('wazuh-alerts_json_path'),
             verify_ssl:       getChecked('wazuh-verify_ssl'),
             min_level:        getInt('wazuh-min_level', 7),
         },
@@ -374,6 +392,14 @@ function collectForm() {
                 asset_inventory_enabled: getChecked('enrichment-asset_inventory_enabled'),
                 asset_inventory_path:    getVal('enrichment-asset_inventory_path'),
                 add_remediation_links:   getChecked('enrichment-add_remediation_links'),
+            },
+            detection: {
+                ...((base.pipeline || {}).detection || {}),
+                enabled: getChecked('detection-enabled'),
+                alert_ttl_hours: getInt('detection-alert_ttl_hours', 168),
+                max_state_entries: getInt('detection-max_state_entries', 10000),
+                db_path: getVal('detection-db_path') || 'data/detection_alerts.db',
+                rules: JSON.parse(JSON.stringify(localDetectionRules || []))
             },
         },
         storage: {
@@ -1066,479 +1092,164 @@ function useCurrentDeviceForRouting(source, routingKey) {
     toast("Populated Add Rule form with device value!", "info");
 }
 
-const DASHBOARD_RANGE_MS = {
-    '15m': 15 * 60 * 1000,
-    '1h': 60 * 60 * 1000,
-    '6h': 6 * 60 * 60 * 1000,
-    '24h': 24 * 60 * 60 * 1000,
-    '7d': 7 * 24 * 60 * 60 * 1000,
-    all: null,
-};
 
-const DASHBOARD_BUCKET_MS = {
-    '1m': 60 * 1000,
-    '5m': 5 * 60 * 1000,
-    '15m': 15 * 60 * 1000,
-    '1h': 60 * 60 * 1000,
-    '6h': 6 * 60 * 60 * 1000,
-    '1d': 24 * 60 * 60 * 1000,
-};
+// ── Detection Engine UI ────────────────────────────────────────
 
-const DASHBOARD_METRIC_LABELS = {
-    alerts: 'Alerts Received',
-    created: 'Tickets Created',
-    updated: 'Tickets Updated',
-    filtered: 'Filtered Findings',
-    deduplicated: 'Deduplicated Findings',
-    failed: 'Failures',
-};
+let localDetectionRules = [];
 
-function setText(id, value) {
-    const el = document.getElementById(id);
-    if (el) el.textContent = value;
-}
-
-function parseDashboardTimestamp(value) {
-    const ts = Date.parse(value || '');
-    return Number.isNaN(ts) ? null : ts;
-}
-
-function formatCompactNumber(value) {
-    return new Intl.NumberFormat().format(Number(value) || 0);
-}
-
-function getDashboardRangeLabel(rangeKey) {
-    const labels = {
-        '15m': 'Last 15 minutes',
-        '1h': 'Last 1 hour',
-        '6h': 'Last 6 hours',
-        '24h': 'Last 24 hours',
-        '7d': 'Last 7 days',
-        all: 'all loaded history',
-    };
-    return labels[rangeKey] || 'Last 24 hours';
-}
-
-function getDashboardBucketLabel(bucketMs) {
-    if (bucketMs <= DASHBOARD_BUCKET_MS['1m']) return '1 minute';
-    if (bucketMs <= DASHBOARD_BUCKET_MS['5m']) return '5 minutes';
-    if (bucketMs <= DASHBOARD_BUCKET_MS['15m']) return '15 minutes';
-    if (bucketMs <= DASHBOARD_BUCKET_MS['1h']) return '1 hour';
-    if (bucketMs <= DASHBOARD_BUCKET_MS['6h']) return '6 hours';
-    return '1 day';
-}
-
-function sumEventStats(evt, keys) {
-    return keys.reduce((total, key) => total + (Number(evt?.stats?.[key]) || 0), 0);
-}
-
-function getEventMetricValue(evt, metric) {
-    switch (metric) {
-        case 'created':
-            return sumEventStats(evt, ['created', 'recreated']);
-        case 'updated':
-            return sumEventStats(evt, ['updated', 'reopened']);
-        case 'filtered':
-            return sumEventStats(evt, ['filtered']);
-        case 'deduplicated':
-            return sumEventStats(evt, ['deduplicated']);
-        case 'failed':
-            return sumEventStats(evt, ['failed']);
-        case 'alerts':
-        default:
-            return Number(evt?.alert_count) || 0;
-    }
-}
-
-function getDashboardFilteredHistory(history) {
-    const ordered = (history || [])
-        .filter(evt => parseDashboardTimestamp(evt.receive_time) !== null)
-        .sort((a, b) => parseDashboardTimestamp(a.receive_time) - parseDashboardTimestamp(b.receive_time));
-
-    const rangeKey = getVal('dashboard-range') || '24h';
-    const rangeMs = Object.prototype.hasOwnProperty.call(DASHBOARD_RANGE_MS, rangeKey)
-        ? DASHBOARD_RANGE_MS[rangeKey]
-        : DASHBOARD_RANGE_MS['24h'];
-
-    if (rangeMs === null) return ordered;
-
-    const cutoff = Date.now() - rangeMs;
-    return ordered.filter(evt => parseDashboardTimestamp(evt.receive_time) >= cutoff);
-}
-
-function computeDashboardSummary(history) {
-    return (history || []).reduce((summary, evt) => {
-        summary.batches += 1;
-        summary.alerts += Number(evt?.alert_count) || 0;
-        summary.created += sumEventStats(evt, ['created', 'recreated']);
-        summary.updated += sumEventStats(evt, ['updated', 'reopened']);
-        summary.filtered += sumEventStats(evt, ['filtered']);
-        summary.deduplicated += sumEventStats(evt, ['deduplicated']);
-        summary.failed += sumEventStats(evt, ['failed']);
-        return summary;
-    }, {
-        batches: 0,
-        alerts: 0,
-        created: 0,
-        updated: 0,
-        filtered: 0,
-        deduplicated: 0,
-        failed: 0,
-    });
-}
-
-function resolveDashboardBucketMs() {
-    const bucketChoice = getVal('dashboard-bucket') || 'auto';
-    if (bucketChoice !== 'auto') {
-        return DASHBOARD_BUCKET_MS[bucketChoice] || DASHBOARD_BUCKET_MS['1h'];
-    }
-
-    switch (getVal('dashboard-range') || '24h') {
-        case '15m':
-            return DASHBOARD_BUCKET_MS['1m'];
-        case '1h':
-            return DASHBOARD_BUCKET_MS['5m'];
-        case '6h':
-            return DASHBOARD_BUCKET_MS['15m'];
-        case '24h':
-            return DASHBOARD_BUCKET_MS['1h'];
-        case '7d':
-            return DASHBOARD_BUCKET_MS['6h'];
-        case 'all':
-        default:
-            return DASHBOARD_BUCKET_MS['1h'];
-    }
-}
-
-function buildDashboardBuckets(history, metric) {
-    const bucketMs = resolveDashboardBucketMs();
-    const timestamps = (history || [])
-        .map(evt => parseDashboardTimestamp(evt.receive_time))
-        .filter(ts => ts !== null);
-
-    if (!timestamps.length) {
-        return { buckets: [], bucketMs };
-    }
-
-    const totals = new Map();
-    history.forEach(evt => {
-        const ts = parseDashboardTimestamp(evt.receive_time);
-        if (ts === null) return;
-        const bucketStart = Math.floor(ts / bucketMs) * bucketMs;
-        totals.set(bucketStart, (totals.get(bucketStart) || 0) + getEventMetricValue(evt, metric));
-    });
-
-    const start = Math.floor(timestamps[0] / bucketMs) * bucketMs;
-    const end = Math.floor(timestamps[timestamps.length - 1] / bucketMs) * bucketMs;
-    const buckets = [];
-
-    for (let cursor = start; cursor <= end; cursor += bucketMs) {
-        buckets.push({ ts: cursor, value: totals.get(cursor) || 0 });
-    }
-
-    return { buckets, bucketMs };
-}
-
-function formatDashboardTimeLabel(ts, bucketMs) {
-    const date = new Date(ts);
-    if (bucketMs < DASHBOARD_BUCKET_MS['1h']) {
-        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    }
-    if (bucketMs < DASHBOARD_BUCKET_MS['1d']) {
-        return date.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-    }
-    return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
-}
-
-function renderDashboardChart(chartData, metric) {
-    const svg = document.getElementById('dashboard-chart');
-    const emptyState = document.getElementById('dashboard-chart-empty');
-    if (!svg || !emptyState) return;
-
-    const { buckets, bucketMs } = chartData;
-    if (!buckets.length) {
-        svg.innerHTML = '';
-        emptyState.style.display = 'flex';
-        setText('dashboard-chart-caption', 'No recent events in the selected window.');
-        return;
-    }
-
-    emptyState.style.display = 'none';
-
-    const width = 760;
-    const height = 260;
-    const padding = { top: 20, right: 20, bottom: 42, left: 56 };
-    const innerWidth = width - padding.left - padding.right;
-    const innerHeight = height - padding.top - padding.bottom;
-    const maxValue = Math.max(...buckets.map(bucket => bucket.value), 1);
-    const chartType = getVal('dashboard-chart-type') || 'line';
-    const labelStep = Math.max(1, Math.ceil(buckets.length / 6));
-
-    const getX = (index) => {
-        if (buckets.length === 1) return padding.left + innerWidth / 2;
-        return padding.left + (index / (buckets.length - 1)) * innerWidth;
-    };
-
-    const getY = (value) => padding.top + innerHeight - (value / maxValue) * innerHeight;
-
-    let markup = '';
-    for (let i = 0; i <= 4; i += 1) {
-        const y = padding.top + (innerHeight / 4) * i;
-        const labelValue = Math.round(maxValue - (maxValue / 4) * i);
-        markup += `<line class="dashboard-grid-line" x1="${padding.left}" y1="${y}" x2="${width - padding.right}" y2="${y}"></line>`;
-        markup += `<text class="dashboard-axis-label" x="${padding.left - 10}" y="${y + 4}" text-anchor="end">${labelValue}</text>`;
-    }
-
-    buckets.forEach((bucket, index) => {
-        if (index % labelStep !== 0 && index !== buckets.length - 1) return;
-        const x = getX(index);
-        markup += `<text class="dashboard-axis-label" x="${x}" y="${height - 14}" text-anchor="middle">${formatDashboardTimeLabel(bucket.ts, bucketMs)}</text>`;
-    });
-
-    if (chartType === 'bar') {
-        const slotWidth = innerWidth / Math.max(buckets.length, 1);
-        const barWidth = Math.max(8, slotWidth * 0.66);
-        buckets.forEach((bucket, index) => {
-            const x = padding.left + index * slotWidth + (slotWidth - barWidth) / 2;
-            const y = getY(bucket.value);
-            const barHeight = Math.max(2, padding.top + innerHeight - y);
-            markup += `<rect class="dashboard-bar" x="${x}" y="${y}" width="${barWidth}" height="${barHeight}" rx="4"></rect>`;
-        });
-    } else {
-        const points = buckets.map((bucket, index) => `${getX(index)},${getY(bucket.value)}`).join(' ');
-        const areaPoints = [
-            `${getX(0)},${padding.top + innerHeight}`,
-            points,
-            `${getX(buckets.length - 1)},${padding.top + innerHeight}`,
-        ].join(' ');
-
-        markup += `<polygon class="dashboard-area" points="${areaPoints}"></polygon>`;
-        markup += `<polyline class="dashboard-line" points="${points}"></polyline>`;
-        buckets.forEach((bucket, index) => {
-            markup += `<circle class="dashboard-point" cx="${getX(index)}" cy="${getY(bucket.value)}" r="4"></circle>`;
-        });
-    }
-
-    svg.innerHTML = markup;
-}
-
-function incrementDashboardCount(counts, key, amount = 1) {
-    if (!key) return;
-    const normalizedKey = String(key);
-    counts.set(normalizedKey, (counts.get(normalizedKey) || 0) + amount);
-}
-
-function getFindingActionLabel(finding) {
-    if (finding?.action === 'recreated') return 'created';
-    if (finding?.action === 'reopened') return 'updated';
-    if (finding?.action) return finding.action;
-
-    const reason = finding?.dedup_reason || finding?.reason || '';
-    if (reason === 'same_batch_duplicate') return 'deduplicated';
-    if (reason.startsWith('Filtered')) return 'filtered';
-    return 'processed';
-}
-
-function renderDashboardTopList(containerId, items, emptyLabel) {
-    const container = document.getElementById(containerId);
+function renderDetectionRules() {
+    const container = document.getElementById('detection-rules-container');
     if (!container) return;
 
-    if (!items.length) {
-        container.innerHTML = `<span class="dashboard-empty-pill">${escapeHtml(emptyLabel)}</span>`;
+    if (localDetectionRules.length === 0) {
+        container.innerHTML = '<div class="detection-no-alerts">No detection rules configured.</div>';
         return;
     }
 
-    container.innerHTML = items.map(([label, count]) => (
-        `<span class="dashboard-pill"><span>${escapeHtml(label)}</span><strong>${formatCompactNumber(count)}</strong></span>`
-    )).join('');
-}
+    container.innerHTML = localDetectionRules.map((rule, idx) => `
+        <div class="detection-rule-card">
+            <div class="detection-rule-header">
+                <div class="detection-rule-title">
+                    ${escapeHtml(rule.name)}
+                    <span class="badge badge-blue" style="font-size:10px">${escapeHtml(rule.type)}</span>
+                </div>
+                <label class="toggle">
+                    <input type="checkbox" class="rule-enabled-toggle" data-idx="${idx}" ${rule.enabled ? 'checked' : ''}>
+                    <span class="toggle-track"></span>
+                </label>
+            </div>
+            <div style="font-size:12px; color:var(--text-secondary); margin-bottom:10px;">
+                Cooldown: ${rule.cooldown_seconds}s &bull; Severity: ${escapeHtml(rule.severity)} &bull; Create Ticket: ${rule.create_ticket ? 'Yes' : 'No'}
+            </div>
+            <div class="detection-rule-params yaml-preview" style="padding:10px; border-radius:4px;">${escapeHtml(JSON.stringify(rule.parameters, null, 2))}</div>
+        </div>
+    `).join('');
 
-function collectDashboardTopItems(history) {
-    const sourceCounts = new Map();
-    const actionCounts = new Map();
-    const ruleCounts = new Map();
-
-    (history || []).forEach(evt => {
-        const findings = Array.isArray(evt.findings) ? evt.findings : [];
-        if (!findings.length) {
-            incrementDashboardCount(sourceCounts, 'webhook batch', 1);
-            return;
-        }
-
-        findings.forEach(finding => {
-            incrementDashboardCount(sourceCounts, finding.source || 'unknown');
-            incrementDashboardCount(actionCounts, getFindingActionLabel(finding));
-            incrementDashboardCount(ruleCounts, finding.matched_rule || finding.title || 'unknown rule');
+    // Bind toggles
+    container.querySelectorAll('.rule-enabled-toggle').forEach(el => {
+        el.addEventListener('change', (e) => {
+            const idx = parseInt(e.target.dataset.idx, 10);
+            if (localDetectionRules[idx]) {
+                localDetectionRules[idx].enabled = e.target.checked;
+            }
         });
     });
-
-    const sortEntries = counts => Array.from(counts.entries())
-        .sort((a, b) => {
-            if (b[1] !== a[1]) return b[1] - a[1];
-            return a[0].localeCompare(b[0]);
-        })
-        .slice(0, 6);
-
-    return {
-        sources: sortEntries(sourceCounts),
-        actions: sortEntries(actionCounts),
-        rules: sortEntries(ruleCounts),
-    };
 }
 
-function renderDashboard(history = latestWebhookHistory) {
-    if (!document.getElementById('page-dashboard')) return;
+async function loadDetectionAlerts() {
+    const feed = document.getElementById('detection-alerts-feed');
+    if (!feed) return;
 
-    const filteredHistory = getDashboardFilteredHistory(history);
-    const summary = computeDashboardSummary(filteredHistory);
-    const metric = getVal('dashboard-metric') || 'alerts';
-    const bucketData = buildDashboardBuckets(filteredHistory, metric);
-    const topItems = collectDashboardTopItems(filteredHistory);
-    const rangeLabel = getDashboardRangeLabel(getVal('dashboard-range') || '24h');
-    const metricLabel = DASHBOARD_METRIC_LABELS[metric] || 'Alerts Received';
+    feed.innerHTML = '<div style="text-align:center; padding: 40px; color:var(--text-muted);">Loading alerts...</div>';
 
-    setText('dashboard-stat-batches', formatCompactNumber(summary.batches));
-    setText('dashboard-stat-alerts', formatCompactNumber(summary.alerts));
-    setText('dashboard-stat-created', formatCompactNumber(summary.created));
-    setText('dashboard-stat-updated', formatCompactNumber(summary.updated));
-    setText('dashboard-stat-filtered', formatCompactNumber(summary.filtered));
-    setText('dashboard-stat-deduplicated', formatCompactNumber(summary.deduplicated));
-    setText('dashboard-stat-failed', formatCompactNumber(summary.failed));
-
-    renderDashboardChart(bucketData, metric);
-    renderDashboardTopList('dashboard-top-sources', topItems.sources, 'No sources in this window');
-    renderDashboardTopList('dashboard-top-actions', topItems.actions, 'No actions in this window');
-    renderDashboardTopList('dashboard-top-rules', topItems.rules, 'No rules in this window');
-
-    if (!filteredHistory.length) {
-        setText('dashboard-chart-caption', `No ${metricLabel.toLowerCase()} events inside ${rangeLabel.toLowerCase()}.`);
-        setText('dashboard-last-updated', 'Waiting for data');
-        return;
+    // Fetch Stats
+    try {
+        const statsRes = await fetch('/api/detection/alerts/stats');
+        const statsData = await statsRes.json();
+        if (statsData.status === 'ok' && statsData.stats) {
+            setText('det-stat-total', statsData.stats.total || 0);
+            setText('det-stat-active', statsData.stats.active || 0);
+            setText('det-stat-ack', statsData.stats.acknowledged || 0);
+            setText('det-stat-resolved', statsData.stats.resolved || 0);
+        }
+    } catch (e) {
+        console.error('Failed to load detection stats:', e);
     }
 
-    const latestTs = parseDashboardTimestamp(filteredHistory[filteredHistory.length - 1].receive_time);
-    setText(
-        'dashboard-chart-caption',
-        `${metricLabel} grouped by ${getDashboardBucketLabel(bucketData.bucketMs)} across ${rangeLabel.toLowerCase()}.`
-    );
-    setText(
-        'dashboard-last-updated',
-        latestTs ? `Latest webhook batch: ${new Date(latestTs).toLocaleString()}` : 'Waiting for data'
-    );
-}
-
-// ── Live Events ────────────────────────────────────────────────
-async function fetchLiveEvents() {
+    // Fetch Alerts
     try {
-        const res = await fetch('/api/webhook/history');
+        const typeFilter = getVal('det-filter-type');
+        const sevFilter = getVal('det-filter-severity');
+        
+        let url = '/api/detection/alerts?limit=50';
+        if (typeFilter) url += '&rule_type=' + encodeURIComponent(typeFilter);
+        if (sevFilter) url += '&severity=' + encodeURIComponent(sevFilter);
+
+        const res = await fetch(url);
         const data = await res.json();
-        let statusBadge = document.getElementById('live-refresh-status');
-        if (statusBadge) {
-            statusBadge.className = 'conn-status ok';
-            statusBadge.innerHTML = '&#8635; Auto-refreshing';
-        }
 
-        const tbody = document.querySelector('#live-events-table tbody');
-        latestWebhookHistory = Array.isArray(data.history) ? data.history : [];
-        renderDashboard(latestWebhookHistory);
+        if (data.status !== 'ok') throw new Error(data.message);
 
-        if (!latestWebhookHistory.length) {
-            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--text-muted); padding:20px 0;">No webhook events received since last restart.<br><span style="font-size:11px;opacity:0.7">Trigger an alert to see it appear here instantly!</span></td></tr>';
+        if (!data.alerts || data.alerts.length === 0) {
+            feed.innerHTML = '<div class="detection-no-alerts">No alerts match the current filters.</div>';
             return;
         }
 
-        let html = '';
-        latestWebhookHistory.forEach(evt => {
-            const time = evt.receive_time.replace('T', ' ').substring(0, 19);
+        feed.innerHTML = data.alerts.map(alert => {
+            const isResolved = alert.resolved;
+            const isAck = alert.acknowledged && !alert.resolved;
+            const statusClass = isResolved ? 'resolved' : (isAck ? 'acknowledged' : '');
             
-            let findingsHtml = '';
-            if (evt.findings && evt.findings.length) {
-                const f = evt.findings[0];
-                let decisionBadge = '';
-                const act = f.action || '';
-                if (act === 'created') {
-                    decisionBadge = '<span class="badge badge-green">Created</span>';
-                } else if (act === 'recreated') {
-                    decisionBadge = '<span class="badge badge-green">Recreated</span>'; 
-                } else if (act === 'updated') {
-                    decisionBadge = '<span class="badge badge-blue">Updated</span>';
-                } else if (act === 'reopened') {
-                    decisionBadge = '<span class="badge badge-blue">Reopened</span>';
-                } else if (act === 'failed') {
-                    decisionBadge = '<span class="badge" style="background:var(--red);color:white">Failed</span>';
-                } else if (f.reason === 'same_batch_duplicate') {
-                    decisionBadge = '<span class="badge badge-orange">Deduped</span>';
-                } else if (f.reason && f.reason.startsWith('Filtered')) {
-                    decisionBadge = '<span class="badge" style="background:var(--bg-hover)">Filtered</span>';
-                } else if (f.reason === 'Deduplication disabled') {
-                    decisionBadge = '<span class="badge badge-purple">Passed</span>';
-                } else {
-                    decisionBadge = '<span class="badge badge-purple">Processed</span>';
+            const sevClass = 'sev-' + alert.severity.toLowerCase();
+            const dateStr = new Date(alert.triggered_at).toLocaleString();
+            
+            let statusBadge = '';
+            if (isResolved) statusBadge = '<span class="det-badge status-res">Resolved</span>';
+            else if (isAck) statusBadge = '<span class="det-badge status-ack">Acknowledged</span>';
+            else statusBadge = '<span class="det-badge status-new">New</span>';
+
+            let actionsHtml = '';
+            if (!isResolved) {
+                actionsHtml += `<button class="btn btn-sm btn-success" onclick="resolveDetectionAlert('${alert.id}')">&#10003; Resolve</button>`;
+                if (!isAck) {
+                    actionsHtml += `<button class="btn btn-sm" onclick="acknowledgeDetectionAlert('${alert.id}')">Acknowledge</button>`;
                 }
-
-                const sourceLinkHtml = f.source_link
-                    ? `<div style="font-size:11px;margin-top:6px;"><a href="${escapeHtml(f.source_link)}" target="_blank" rel="noopener noreferrer">Source finding</a></div>`
-                    : '';
-
-                findingsHtml = `<b>${escapeHtml(f.title || 'Unknown Rule')}</b><br>
-                <div style="margin-top:4px;display:flex;gap:6px;align-items:center;">
-                    ${decisionBadge}
-                    <span class="badge" style="background:var(--bg-hover)">Sev: ${escapeHtml(f.severity)}</span>
-                </div>
-                <div style="font-size:11px;color:var(--text-secondary);margin-top:4px;border-left:2px solid var(--border);padding-left:6px;">
-                    <div>Host: <span style="color:var(--text)">${escapeHtml(f.host || '')}</span></div>
-                    <div style="display:flex; justify-content:space-between; align-items:center;">
-                        <div>Device Name Used For Routing: <span style="font-family:'JetBrains Mono', monospace;color:var(--accent)">${escapeHtml(f.routing_key || '')}</span></div>
-                        <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;height:auto;" onclick="useCurrentDeviceForRouting('${encodeAttrValue(f.source || '')}', '${encodeAttrValue(f.routing_key || '')}')">Use Device for Routing</button>
-                    </div>
-                </div>
-                <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">
-                    Dedup: <i>${escapeHtml(f.dedup_reason || f.reason || 'Unknown')}</i> &bull; Tracker: ${f.selected_tracker || '?'} &bull; Rule: ${escapeHtml(f.matched_rule || 'none')} &bull; Occurrences: ${f.occurrences || 1}
-                </div>
-                ${sourceLinkHtml}`;
-
-                if (evt.findings.length > 1) {
-                    findingsHtml += `<div style="font-size:11px;color:var(--text-muted);margin-top:4px;">+ ${evt.findings.length - 1} more</div>`;
-                }
-            } else {
-                findingsHtml = '<span style="color:var(--text-muted)">No parsable findings</span>';
             }
 
-            const s = evt.stats || {};
-            let statsHtml = [];
-            if (s.created > 0) statsHtml.push(`<span style="color:var(--green)">Created: ${s.created}</span>`);
-            if (s.recreated > 0) statsHtml.push(`<span style="color:var(--green)">Recreated: ${s.recreated}</span>`);
-            if (s.updated > 0) statsHtml.push(`<span style="color:var(--accent)">Updated: ${s.updated}</span>`);
-            if (s.reopened > 0) statsHtml.push(`<span style="color:var(--accent)">Reopened: ${s.reopened}</span>`);
-            if (s.deduplicated > 0) statsHtml.push(`<span style="color:var(--orange)">Deduplicated: ${s.deduplicated}</span>`);
-            if (s.filtered > 0) statsHtml.push(`<span style="color:var(--text-muted)">Filtered: ${s.filtered}</span>`);
-            if (s.failed > 0) statsHtml.push(`<span style="color:var(--red)">Failed: ${s.failed}</span>`);
+            return `
+                <div class="detection-alert-card ${sevClass} ${statusClass}">
+                    <div class="detection-alert-header">
+                        ${statusBadge}
+                        <span class="det-badge type-badge">${escapeHtml(alert.rule_type)}</span>
+                        <span class="det-badge ${sevClass}">${escapeHtml(alert.severity)}</span>
+                        <span style="font-weight:600; font-size:14px; margin-left:4px;">${escapeHtml(alert.rule_name)}</span>
+                    </div>
+                    <div class="detection-alert-desc">${escapeHtml(alert.description)}</div>
+                    <div class="detection-alert-evidence">${escapeHtml(JSON.stringify(alert.evidence, null, 2))}</div>
+                    <div class="detection-alert-footer">
+                        <div>Triggered: ${dateStr} &bull; ID: <span style="font-family:'JetBrains Mono', monospace">${alert.id.substring(0,8)}</span></div>
+                        <div class="detection-alert-actions">${actionsHtml}</div>
+                    </div>
+                </div>
+            `;
+        }).join('');
 
-            html += `<tr>
-                <td style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-secondary)">${time}</td>
-                <td>${evt.alert_count}</td>
-                <td style="font-size:13px">${findingsHtml}</td>
-                <td style="font-size:12px;font-weight:600;display:flex;flex-direction:column;gap:3px">${statsHtml.join('') || '-'}</td>
-            </tr>`;
-        });
-        
-        tbody.innerHTML = html;
-    } catch(e) {
-        console.error("Live events fetch failed", e);
-        latestWebhookHistory = [];
-        renderDashboard(latestWebhookHistory);
-        let statusBadge = document.getElementById('live-refresh-status');
-        if (statusBadge) {
-            statusBadge.className = 'conn-status fail';
-            statusBadge.textContent = 'Disconnected';
-        }
+    } catch (e) {
+        feed.innerHTML = `<div style="text-align:center; padding: 20px; color:var(--red);">Failed to load alerts: ${e.message}</div>`;
     }
 }
 
-setInterval(fetchLiveEvents, 3000);
-fetchLiveEvents();
+async function acknowledgeDetectionAlert(id) {
+    try {
+        const res = await fetch(`/api/detection/alerts/${id}/acknowledge`, { method: 'POST' });
+        const data = await res.json();
+        if (data.status === 'ok') {
+            toast('Alert acknowledged', 'success');
+            loadDetectionAlerts();
+        } else {
+            toast('Error: ' + data.message, 'error');
+        }
+    } catch (e) {
+        toast('Network error', 'error');
+    }
+}
 
-// ── Backup UI Logic ────────────────────────────────────────────
+async function resolveDetectionAlert(id) {
+    try {
+        const res = await fetch(`/api/detection/alerts/${id}/resolve`, { method: 'POST' });
+        const data = await res.json();
+        if (data.status === 'ok') {
+            toast('Alert resolved', 'success');
+            loadDetectionAlerts();
+        } else {
+            toast('Error: ' + data.message, 'error');
+        }
+    } catch (e) {
+        toast('Network error', 'error');
+    }
+}
+
+
 async function openBackupViewer() {
     document.getElementById('backup-modal').style.display = 'flex';
     const listEl = document.getElementById('backup-list');
@@ -1620,10 +1331,6 @@ async function restoreBackup(filename) {
     const el = document.getElementById(id);
     if (el) el.addEventListener('change', resetDefectDojoFindingCountPreview);
 });
-['dashboard-range', 'dashboard-metric', 'dashboard-chart-type', 'dashboard-bucket'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.addEventListener('change', () => renderDashboard(latestWebhookHistory));
-});
 [
     ['filter-example-fortigate', 'fortigate'],
     ['filter-example-wazuh-drop', 'wazuhDrop'],
@@ -1632,5 +1339,8 @@ async function restoreBackup(filename) {
     const el = document.getElementById(id);
     if (el) el.addEventListener('click', () => loadJsonRuleExample(exampleName));
 });
-renderDashboard([]);
+['det-filter-type', 'det-filter-severity'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('change', loadDetectionAlerts);
+});
 loadConfig();

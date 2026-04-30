@@ -4,7 +4,11 @@
 
 # --- Wazuh SIEM ---
 wazuh:
-  base_url: https://10.145.10.57:55000
+  alerts_json_path: /var/ossec/logs/alerts/alerts.json
+  base_url: https://127.0.0.1:55000
+  indexer_password: jzU6&kfabdSH.
+  indexer_url: https://127.0.0.1:9200
+  indexer_username: admin
   min_level: 4
   password: jzU6&kfabdSH
   username: wazuh-api
@@ -62,24 +66,24 @@ pipeline:
   detection:
     alert_ttl_hours: 168
     db_path: data/detection_alerts.db
-    enabled: true
+    enabled: false
     max_state_entries: 10000
     rules:
     - cooldown_seconds: 300
       create_ticket: false
-      enabled: true
+      enabled: false
       name: Brute Force Login Detection
       parameters:
         event_type_field: data.status
         event_type_value: failed
         group_by: srcip
         threshold: 5
-        window_seconds: 300
+        window_seconds: 60
       severity: high
       type: brute_force
     - cooldown_seconds: 60
       create_ticket: false
-      enabled: true
+      enabled: false
       name: Suspicious Port Connection
       parameters:
         port_field: dstport
@@ -95,7 +99,7 @@ pipeline:
       type: abnormal_port
     - cooldown_seconds: 600
       create_ticket: false
-      enabled: true
+      enabled: false
       name: Impossible Travel Detection
       parameters:
         group_by: user
@@ -105,7 +109,7 @@ pipeline:
       type: impossible_travel
     - cooldown_seconds: 300
       create_ticket: false
-      enabled: true
+      enabled: false
       name: Port Scan Detection
       parameters:
         group_by: srcip
@@ -124,16 +128,7 @@ pipeline:
     exclude_title_patterns:
     - ^Syscheck.*
     include_hosts: []
-    json_rules:
-    - action: drop
-      conditions:
-      - op: equals
-        path: data.status
-        value: failed
-      enabled: true
-      match: all
-      name: drop-raw-wazuh-failed-logins
-      source: wazuh
+    json_rules: []
     min_severity: low
   initial_lookback_minutes: 1440
   poll_interval: 300

@@ -114,6 +114,7 @@ def test_postgres_init_creates_ticket_state_and_outbound_queue_tables():
     assert "CREATE TABLE IF NOT EXISTS \"middleware\".\"ticket_state\"" in init_sql
     assert "CREATE TABLE IF NOT EXISTS \"middleware\".\"outbound_jobs\"" in init_sql
     assert "CREATE TABLE IF NOT EXISTS \"middleware\".\"ingest_events\"" in init_sql
+    assert "middleware_dashboard_events" not in init_sql
     assert "last_ticket_check_at" in init_sql
     assert "next_attempt_at" in init_sql
 

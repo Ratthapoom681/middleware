@@ -1,0 +1,163 @@
+# ============================================================
+# Security Middleware Pipeline - Configuration
+# ============================================================
+
+# --- Wazuh SIEM ---
+wazuh:
+  # Manager API (for connection test / agent management)
+  base_url: "https://127.0.0.1:55000"
+  username: "wazuh-api-user"
+  password: "changeme"
+  # Indexer API (OpenSearch — where alerts are stored)
+  indexer_url: "https://127.0.0.1:9200"
+  indexer_username: "admin"
+  indexer_password: "admin"
+  verify_ssl: false
+  # Only fetch alerts with level >= this value (0-15)
+  min_level: 7
+  # Read alerts directly from JSON file (leave empty to use Indexer API instead)
+  alerts_json_path: "/var/ossec/logs/alerts/alerts.json"
+
+# --- DefectDojo Vulnerability Management ---
+defectdojo:
+  enabled: true
+  base_url: "https://defectdojo.example.com/api/v2"
+  api_key: "Token changeme"
+  verify_ssl: true
+  # Only fetch findings with these severities
+  severity_filter:
+    - Critical
+    - High
+    - Medium
+  # Optional scope filters for large DefectDojo instances
+  product_ids: []
+  engagement_ids: []
+  test_ids: []
+  active: true
+  verified: true
+  updated_since_minutes: 0
+  fetch_limit: 1000
+  cursor_path: "data/defectdojo_cursor.json"
+
+# --- Redmine Issue Tracker ---
+redmine:
+  base_url: "https://redmine.example.com"
+  api_key: "changeme"
+  project_id: "security-incidents"
+  # Default tracker ID for finding tasks
+  tracker_id: 1
+  # Create a parent issue for each device and attach findings as subtasks
+  enable_parent_issues: true
+  # Optional: different tracker ID for the device parent issues (e.g., an "Epic" tracker)
+  # parent_tracker_id: 2
+  # Custom field ID for storing dedup hash (optional, set to null to use subject matching)
+  dedup_custom_field_id: null
+  # Map unified severity → Redmine priority ID
+  priority_map:
+    critical: 5
+    high: 4
+    medium: 3
+    low: 2
+    info: 1
+
+# --- Pipeline Settings ---
+pipeline:
+  # Polling interval in seconds (how often to check for new alerts)
+  poll_interval: 300              # 5 minutes
+  # How far back to look on first poll (in minutes)
+  initial_lookback_minutes: 1440  # 24 hours
+
+  # Filter rules
+  filter:
+    # Minimum unified severity to keep (info, low, medium, high, critical)
+    min_severity: "low"
+    # Exclude alerts matching these Wazuh rule IDs
+    exclude_rule_ids: []
+    # Only include findings for these hosts (regex patterns, empty = all)
+    include_hosts: []
+    # Exclude findings matching these title patterns (regex)
+    exclude_title_patterns:
+      - "^Syscheck.*"
+
+  # Deduplication
+  dedup:
+    enabled: true
+    # SQLite database path for tracking seen hashes
+    db_path: "data/dedup.db"
+    # Time-to-live in hours — findings can be re-created after this window
+    ttl_hours: 168                # 7 days
+
+  # Enrichment
+  enrichment:
+    # Add asset metadata from a static inventory
+    asset_inventory_enabled: false
+    asset_inventory_path: "config/assets.yaml"
+    # Add remediation links
+    add_remediation_links: true
+
+  # Detection Rules (Security Use Case Engine)
+  detection:
+    enabled: false
+    alert_ttl_hours: 168             # 7 days retention
+    max_state_entries: 10000
+    db_path: "data/detection_alerts.db"
+    rules:
+      - name: "Brute Force Login Detection"
+        type: "brute_force"
+        enabled: false
+        severity: "high"
+        cooldown_seconds: 300
+        create_ticket: false
+        parameters:
+          threshold: 5
+          window_seconds: 60
+          event_type_field: "data.status"
+          event_type_value: "failed"
+          group_by: "srcip"
+
+      - name: "Suspicious Port Connection"
+        type: "abnormal_port"
+        enabled: false
+        severity: "medium"
+        cooldown_seconds: 60
+        create_ticket: false
+        parameters:
+          suspicious_ports: [4444, 1337, 31337, 6666, 6667, 12345, 65535]
+          port_field: "dstport"
+
+      - name: "Impossible Travel Detection"
+        type: "impossible_travel"
+        enabled: false
+        severity: "critical"
+        cooldown_seconds: 600
+        create_ticket: false
+        parameters:
+          max_travel_seconds: 3600
+          window_seconds: 7200
+          group_by: "user"
+
+      - name: "Port Scan Detection"
+        type: "port_scan"
+        enabled: false
+        severity: "high"
+        cooldown_seconds: 300
+        create_ticket: false
+        parameters:
+          threshold: 15
+          window_seconds: 60
+          group_by: "srcip"
+          port_field: "dstport"
+
+# --- Shared State Storage ---
+storage:
+  # local = SQLite dedup + file checkpoints, postgres = shared state for multi-instance/high-volume setups
+  backend: "local"
+  postgres_dsn: ""
+  postgres_schema: "public"
+  dedup_table: "middleware_seen_hashes"
+  checkpoint_table: "middleware_checkpoints"
+
+# --- Logging ---
+logging:
+  level: "INFO"                   # DEBUG, INFO, WARNING, ERROR
+  format: "%(asctime)s [%(levelname)s] %(name)s: %(message)s"

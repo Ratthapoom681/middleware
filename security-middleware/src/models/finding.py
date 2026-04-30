@@ -90,6 +90,12 @@ class Finding:
     # --- Context ---
     host: str = ""                          # Affected hostname or IP (UI fallback/routing)
     srcip: str = ""                         # Attacker origin IP
+    dstip: str = ""                         # Destination IP
+    dstport: str = ""                       # Destination port
+    protocol: str = ""                      # Network protocol
+    src_country: str = ""                   # Source country (from Wazuh GeoIP)
+    dst_country: str = ""                   # Destination country (from Wazuh GeoIP)
+    geolocation: dict[str, Any] = field(default_factory=dict)  # Full GeoLocation object
     endpoints: list[str] = field(default_factory=list) # DefectDojo explicit endpoints
     endpoint_url: str = ""                  # Explicit ZAP/Web URL target
     component: str = ""                     # Dependency or system component
@@ -135,6 +141,12 @@ class Finding:
             "raw_severity": self.raw_severity,
             "host": self.host,
             "srcip": self.srcip,
+            "dstip": self.dstip,
+            "dstport": self.dstport,
+            "protocol": self.protocol,
+            "src_country": self.src_country,
+            "dst_country": self.dst_country,
+            "geolocation": self.geolocation,
             "endpoints": self.endpoints,
             "endpoint_url": self.endpoint_url,
             "component": self.component,
@@ -185,6 +197,12 @@ class Finding:
             raw_severity=str(data.get("raw_severity", "")),
             host=str(data.get("host", "")),
             srcip=str(data.get("srcip", "")),
+            dstip=str(data.get("dstip", "")),
+            dstport=str(data.get("dstport", "")),
+            protocol=str(data.get("protocol", "")),
+            src_country=str(data.get("src_country", "")),
+            dst_country=str(data.get("dst_country", "")),
+            geolocation=dict(data.get("geolocation", {}) or {}),
             endpoints=[str(item) for item in data.get("endpoints", []) or []],
             endpoint_url=str(data.get("endpoint_url", "")),
             component=str(data.get("component", "")),

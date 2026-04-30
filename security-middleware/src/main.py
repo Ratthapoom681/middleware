@@ -2,7 +2,7 @@
 Security Middleware Pipeline — Main Entry Point.
 
 Orchestrates the full pipeline:
-  1. Fetch findings from Wazuh and DefectDojo
+  1. Ingest Wazuh webhook findings and poll DefectDojo findings
   2. Run through pipeline stages (filter → severity map → dedup → enrich)
   3. Create/update tickets in Redmine
   4. Repeat on the configured polling interval
@@ -34,8 +34,9 @@ from src.pipeline.filter import FilterStage
 from src.pipeline.severity_mapper import SeverityMapperStage
 from src.pipeline.deduplicator import DeduplicatorStage
 from src.pipeline.enricher import EnricherStage
+from src.pipeline.detection_engine import DetectionEngine
+from src.pipeline.detection_store import DetectionAlertStore
 from src.output.redmine_client import RedmineClient
-from src.dashboard_history import create_dashboard_history_store
 from src.state_store import create_state_store
 
 logger = logging.getLogger("middleware")
@@ -60,7 +61,6 @@ class MiddlewarePipeline:
         self.config_path = config_path or config._loaded_path or "config/config.yaml"
         self._last_config_mtime = self._get_config_mtime()
         self.state_store = create_state_store(config.storage)
-        self.dashboard_history = create_dashboard_history_store(config.storage, self.state_store)
 
         # Source clients
         self.wazuh = WazuhClient(config.wazuh)
@@ -74,6 +74,21 @@ class MiddlewarePipeline:
 
         # Output
         self.redmine = RedmineClient(config.redmine)
+
+        # Detection engine
+        self._init_detection_engine(config)
+
+    def _init_detection_engine(self, config: AppConfig) -> None:
+        """Initialize the detection engine and its alert store."""
+        self.detection_engine = DetectionEngine(config.pipeline.detection)
+        self.detection_store: DetectionAlertStore | None = None
+        if config.pipeline.detection.enabled:
+            self.detection_store = DetectionAlertStore(
+                db_path=config.pipeline.detection.db_path
+            )
+            self.detection_engine.set_alert_store(self.detection_store)
+            logger.info("Detection engine enabled with %d rule(s)",
+                        len([r for r in config.pipeline.detection.rules if r.enabled]))
 
     def _get_config_mtime(self) -> float:
         import os
@@ -92,13 +107,11 @@ class MiddlewarePipeline:
                 from src.config import load_config
                 new_config = load_config(self.config_path)
                 new_state_store = create_state_store(new_config.storage)
-                new_dashboard_history = create_dashboard_history_store(new_config.storage, new_state_store)
 
                 self.close()
 
                 self.config = new_config
                 self.state_store = new_state_store
-                self.dashboard_history = new_dashboard_history
 
                 # Re-initialize all clients with new config
                 self.wazuh = WazuhClient(self.config.wazuh)
@@ -114,6 +127,12 @@ class MiddlewarePipeline:
                 )
                 self.enricher = EnricherStage(self.config.pipeline.enrichment)
                 self.redmine = RedmineClient(self.config.redmine)
+
+                # Reload detection engine
+                if hasattr(self, 'detection_store') and self.detection_store:
+                    self.detection_store.close()
+                self._init_detection_engine(self.config)
+
                 logger.info("Pipeline components reloaded successfully.")
                 self.test_connections()
             except Exception as e:
@@ -142,8 +161,8 @@ class MiddlewarePipeline:
 
     def run_cycle(self) -> dict[str, int]:
         """
-        Execute a single pipeline cycle:
-          fetch → filter → map → dedup → enrich → output
+        Execute a single DefectDojo polling cycle:
+          ingest → filter → map → dedup → enrich → output
         """
         cycle_start = datetime.now(timezone.utc)
         logger.info("=" * 60)
@@ -152,17 +171,7 @@ class MiddlewarePipeline:
 
         # --- 1. Ingest ---
         findings: list[Finding] = []
-        wazuh_findings: list[Finding] = []
-
-        logger.info("--- Ingesting from Wazuh ---")
-        try:
-            wazuh_findings = self.wazuh.fetch_alerts(
-                since_minutes=self.config.pipeline.initial_lookback_minutes
-            )
-            findings.extend(wazuh_findings)
-            logger.info("Wazuh: %d alerts ingested", len(wazuh_findings))
-        except Exception as e:
-            logger.error("Wazuh ingestion failed: %s", e)
+        # Wazuh polling removed. Alerts will be ingested via the /api/webhook/wazuh endpoint.
 
         dd_findings: list[Finding] = []
         if self.config.defectdojo.enabled:
@@ -207,7 +216,6 @@ class MiddlewarePipeline:
                         "origin": "poll",
                         "alert_count": len(persisted_event_ids),
                         "source_counts": {
-                            "wazuh": len(wazuh_findings),
                             "defectdojo": len(dd_findings),
                         },
                     },
@@ -253,7 +261,6 @@ class MiddlewarePipeline:
                     "origin": "poll",
                     "alert_count": len(findings),
                     "source_counts": {
-                        "wazuh": len(wazuh_findings),
                         "defectdojo": len(dd_findings),
                     },
                 },
@@ -291,6 +298,16 @@ class MiddlewarePipeline:
         original_findings = list(findings)
         total_ingested = len(findings)
         logger.info("Processing batch: %d findings", total_ingested)
+
+        # --- Detection Engine (evaluate before filtering) ---
+        if self.detection_engine.enabled:
+            logger.info("--- Detection Engine ---")
+            try:
+                detection_alerts = self.detection_engine.evaluate(findings)
+                if detection_alerts:
+                    logger.info("Detection engine generated %d alert(s)", len(detection_alerts))
+            except Exception as exc:
+                logger.error("Detection engine evaluation failed: %s", exc)
 
         # --- 2. Filter ---
         logger.info("--- Filtering ---")
@@ -405,7 +422,6 @@ class MiddlewarePipeline:
             },
             "results": results
         }
-        self._record_dashboard_event(outcome, event_context)
         return outcome
 
     def _async_delivery_enabled(self) -> bool:
@@ -938,38 +954,18 @@ class MiddlewarePipeline:
         self.close()
         return result
 
-    def _record_dashboard_event(self, outcome: dict[str, Any], event_context: dict[str, Any] | None = None) -> None:
-        """Persist one dashboard event so polling and webhook paths share history."""
-        if not getattr(self, "dashboard_history", None):
-            return
-
-        event_context = event_context or {}
-        record = {
-            "id": str(uuid4()),
-            "receive_time": datetime.now(timezone.utc).isoformat(),
-            "origin": event_context.get("origin", "pipeline"),
-            "alert_count": int(event_context.get("alert_count", outcome["stats"].get("ingested", 0)) or 0),
-            "source_counts": event_context.get("source_counts", {}),
-            "findings": outcome.get("results", []),
-            "stats": outcome.get("stats", {}),
-        }
-        try:
-            self.dashboard_history.append_dashboard_event(record)
-        except Exception as exc:
-            logger.warning("Failed to persist dashboard event: %s", exc)
-
     def close(self) -> None:
         """Close open pipeline resources."""
-        if getattr(self, "dashboard_history", None) is not None and self.dashboard_history is not self.state_store:
-            try:
-                self.dashboard_history.close()
-            except Exception:
-                logger.debug("Dashboard history close failed", exc_info=True)
-            self.dashboard_history = None
-
         if hasattr(self, "dedup_stage") and self.dedup_stage:
             self.dedup_stage.close()
             self.dedup_stage = None
+
+        if getattr(self, "detection_store", None) is not None:
+            try:
+                self.detection_store.close()
+            except Exception:
+                logger.debug("Detection store close failed", exc_info=True)
+            self.detection_store = None
 
         if getattr(self, "state_store", None) is not None:
             try:

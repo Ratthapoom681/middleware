@@ -4,11 +4,8 @@ Tests for the configuration web UI and API surface.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import yaml
 
-from src import dashboard_history as dashboard_history_module
 from src.sources.defectdojo_client import DefectDojoClient
 from web import server
 
@@ -269,20 +266,12 @@ def test_config_api_round_trips_delivery_settings(workspace_tmp_dir, monkeypatch
         assert saved["pipeline"]["delivery"]["store_first_ingest"] is True
 
 
-def test_static_ui_assets_reference_new_defectdojo_fields():
+def test_static_ui_assets_reflect_webhook_only_wazuh_and_new_defectdojo_fields():
     html = (server.PROJECT_ROOT / "web" / "static" / "index.html").read_text(encoding="utf-8")
     js = (server.PROJECT_ROOT / "web" / "static" / "js" / "app.js").read_text(encoding="utf-8")
+    assets = html + js
 
     for token in [
-        "data-section=\"dashboard\"",
-        "page-dashboard",
-        "dashboard-range",
-        "dashboard-metric",
-        "dashboard-chart-type",
-        "dashboard-bucket",
-        "dashboard-chart",
-        "dashboard-top-sources",
-        "renderDashboard",
         "defectdojo-active",
         "defectdojo-verified",
         "defectdojo-updated_since_minutes",
@@ -307,37 +296,100 @@ def test_static_ui_assets_reference_new_defectdojo_fields():
         "storage-dedup_table",
         "storage-checkpoint_table",
     ]:
-        assert token in html or token in js
+        assert token in assets
+
+    for removed_token in [
+        "data-section=\"dashboard\"",
+        "page-dashboard",
+        "dashboard-range",
+        "dashboard-metric",
+        "dashboard-chart-type",
+        "dashboard-bucket",
+        "dashboard-chart",
+        "dashboard-top-sources",
+        "renderDashboard",
+        "wazuh-indexer_url",
+        "wazuh-indexer_username",
+        "wazuh-indexer_password",
+        "wazuh-alerts_json_path",
+        "latestWebhookHistory",
+        "/api/webhook/history",
+    ]:
+        assert removed_token not in assets
+
+    assert 'class="nav-item active" data-section="detection-rules"' in html
+    assert '<h2 id="section-title">Detection Rules</h2>' in html
+    assert '<div class="section-page active" id="page-detection-rules">' in html
 
 
-def test_webhook_history_endpoint_reads_persisted_dashboard_history(workspace_tmp_dir, monkeypatch):
+def test_wazuh_webhook_processes_payload_through_pipeline(workspace_tmp_dir, monkeypatch):
     config_path = workspace_tmp_dir / "config.yaml"
     backup_dir = workspace_tmp_dir / "backups"
-    history_path = workspace_tmp_dir / "dashboard_events.jsonl"
-    config_path.write_text(yaml.safe_dump({}), encoding="utf-8")
+    config_path.write_text(
+        yaml.safe_dump({"wazuh": {"min_level": 0}, "pipeline": {"filter": {"min_severity": "info"}}}),
+        encoding="utf-8",
+    )
 
     monkeypatch.setattr(server, "CONFIG_PATH", config_path)
     monkeypatch.setattr(server, "BACKUP_DIR", backup_dir)
-    monkeypatch.setattr(dashboard_history_module, "DEFAULT_LOCAL_HISTORY_PATH", history_path)
 
-    history_store = dashboard_history_module.LocalDashboardHistoryStore(history_path)
-    history_store.append_dashboard_event(
-        {
-            "id": "evt-1",
-            "receive_time": "2026-04-20T01:00:00+00:00",
-            "origin": "poll",
-            "alert_count": 3,
-            "source_counts": {"wazuh": 2, "defectdojo": 1},
-            "findings": [],
-            "stats": {"ingested": 3, "created": 1},
-        }
-    )
+    captured = {}
+
+    class FakePipeline:
+        def __init__(self, config):
+            captured["config"] = config
+
+        def _store_first_ingest_enabled(self):
+            return False
+
+        def process_batch(self, findings, event_context=None):
+            captured["findings"] = findings
+            captured["event_context"] = event_context
+            return {
+                "stats": {
+                    "ingested": len(findings),
+                    "filtered": 0,
+                    "deduplicated": 0,
+                    "created": 0,
+                    "updated": 0,
+                    "reopened": 0,
+                    "recreated": 0,
+                    "queued": 0,
+                    "failed": 0,
+                }
+            }
+
+        def close(self):
+            captured["closed"] = True
+
+    monkeypatch.setattr(server, "MiddlewarePipeline", FakePipeline)
 
     with server.app.test_client() as client:
-        response = client.get("/api/webhook/history")
+        response = client.post(
+            "/api/webhook/wazuh",
+            json={
+                "id": "alert-1",
+                "timestamp": "2026-04-30T01:00:00+00:00",
+                "rule": {
+                    "id": "5710",
+                    "level": 7,
+                    "description": "Failed login",
+                    "groups": ["authentication_failed"],
+                },
+                "agent": {"name": "web-01", "ip": "10.0.0.10"},
+                "data": {"status": "failed", "srcip": "10.0.0.1"},
+            },
+        )
 
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["status"] == "ok"
-    assert payload["history"][0]["origin"] == "poll"
-    assert payload["history"][0]["stats"]["ingested"] == 3
+    assert payload["stats"]["ingested"] == 1
+    assert captured["findings"][0].source.value == "wazuh"
+    assert captured["findings"][0].title == "Failed login"
+    assert captured["event_context"] == {
+        "origin": "webhook",
+        "alert_count": 1,
+        "source_counts": {"wazuh": 1},
+    }
+    assert captured["closed"] is True

@@ -57,6 +57,24 @@ def test_defectdojo_config_normalizes_scope_and_checkpoint_fields():
     assert config.defectdojo.cursor_path == "data/custom_checkpoint.json"
 
 
+def test_wazuh_config_ignores_legacy_polling_fields():
+    config = _build_config({
+        "wazuh": {
+            "base_url": "https://wazuh.example.local:55000",
+            "indexer_url": "https://wazuh.example.local:9200",
+            "indexer_username": "admin",
+            "indexer_password": "secret",
+            "alerts_json_path": "/var/ossec/logs/alerts/alerts.json",
+            "min_level": 4,
+        }
+    })
+
+    assert config.wazuh.base_url == "https://wazuh.example.local:55000"
+    assert config.wazuh.min_level == 4
+    assert not hasattr(config.wazuh, "indexer_url")
+    assert not hasattr(config.wazuh, "alerts_json_path")
+
+
 def test_filter_config_builds_advanced_json_rules():
     config = _build_config({
         "pipeline": {

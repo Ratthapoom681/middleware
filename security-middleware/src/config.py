@@ -108,21 +108,26 @@ def _normalize_raw_config(raw: dict[str, Any]) -> dict[str, Any]:
             if isinstance(rule, dict):
                 rule["source"] = _normalize_routing_source(rule.get("source"))
 
+    wazuh_raw = normalized.get("wazuh", {})
+    if isinstance(wazuh_raw, dict):
+        for legacy_key in (
+            "alerts_json_path",
+            "indexer_url",
+            "indexer_username",
+            "indexer_password",
+        ):
+            wazuh_raw.pop(legacy_key, None)
+
     return normalized
 
 
 @dataclass
 class WazuhConfig:
     base_url: str = "https://localhost:55000"
-    indexer_url: str = "https://localhost:9200"
     username: str = "wazuh"
     password: str = "changeme"
-    indexer_username: str = "admin"
-    indexer_password: str = "admin"
     verify_ssl: bool = False
     min_level: int = 7
-    # Path to Wazuh alerts.json file (if set, reads from file instead of Indexer API)
-    alerts_json_path: str = ""
 
 
 @dataclass
@@ -347,6 +352,61 @@ class EnrichmentConfig:
 
 
 @dataclass
+class DetectionRuleConfig:
+    """Configuration for a single detection rule."""
+    name: str = ""
+    type: str = ""        # brute_force, abnormal_port, impossible_travel, port_scan
+    enabled: bool = True
+    severity: str = "high"
+    parameters: dict[str, Any] = field(default_factory=dict)
+    cooldown_seconds: int = 300
+    create_ticket: bool = False    # Whether to create Redmine ticket on trigger
+
+    def __post_init__(self) -> None:
+        self.name = str(self.name or "").strip()
+        self.type = str(self.type or "").strip().lower()
+        self.enabled = _normalize_bool(self.enabled, True)
+        self.severity = str(self.severity or "high").strip().lower() or "high"
+        self.cooldown_seconds = max(0, _normalize_int(self.cooldown_seconds, 300))
+        self.create_ticket = _normalize_bool(self.create_ticket, False)
+        if self.parameters is None:
+            self.parameters = {}
+
+        valid_types = {"brute_force", "abnormal_port", "impossible_travel", "port_scan"}
+        if self.type and self.type not in valid_types:
+            raise ValueError(
+                f"pipeline.detection.rules type '{self.type}' is not supported. "
+                f"Valid types: {', '.join(sorted(valid_types))}"
+            )
+
+
+@dataclass
+class DetectionConfig:
+    """Configuration for the detection rule engine."""
+    enabled: bool = False
+    rules: list[DetectionRuleConfig] = field(default_factory=list)
+    alert_ttl_hours: int = 168          # 7 days
+    max_state_entries: int = 10000      # max sliding window entries per rule
+    db_path: str = "data/detection_alerts.db"
+
+    def __post_init__(self) -> None:
+        self.enabled = _normalize_bool(self.enabled, False)
+        self.alert_ttl_hours = max(1, _normalize_int(self.alert_ttl_hours, 168))
+        self.max_state_entries = max(100, _normalize_int(self.max_state_entries, 10000))
+        self.db_path = str(self.db_path or "data/detection_alerts.db").strip()
+
+        normalized_rules: list[DetectionRuleConfig] = []
+        for rule in self.rules or []:
+            if isinstance(rule, DetectionRuleConfig):
+                normalized_rules.append(rule)
+            elif isinstance(rule, dict):
+                normalized_rules.append(DetectionRuleConfig(**rule))
+            else:
+                raise ValueError("pipeline.detection.rules entries must be objects")
+        self.rules = normalized_rules
+
+
+@dataclass
 class PipelineConfig:
     poll_interval: int = 300            # seconds between each poll cycle
     initial_lookback_minutes: int = 1440  # how far back to look on first poll (default 24h)
@@ -354,6 +414,7 @@ class PipelineConfig:
     dedup: DedupConfig = field(default_factory=DedupConfig)
     delivery: DeliveryConfig = field(default_factory=DeliveryConfig)
     enrichment: EnrichmentConfig = field(default_factory=EnrichmentConfig)
+    detection: DetectionConfig = field(default_factory=DetectionConfig)
 
 
 @dataclass
@@ -447,6 +508,7 @@ def _build_config(raw: dict[str, Any]) -> AppConfig:
         dedup=DedupConfig(**pipeline_raw.get("dedup", {})),
         delivery=DeliveryConfig(**pipeline_raw.get("delivery", {})),
         enrichment=EnrichmentConfig(**pipeline_raw.get("enrichment", {})),
+        detection=DetectionConfig(**pipeline_raw.get("detection", {})),
     )
     storage = StorageConfig(**normalized_raw.get("storage", {}))
 

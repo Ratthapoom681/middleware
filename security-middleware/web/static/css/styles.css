@@ -42,6 +42,7 @@
         /* ── Sidebar ─────────────────────────────────────────── */
         .sidebar {
             width: 260px;
+            height: 100vh;
             min-height: 100vh;
             background: var(--bg-surface);
             border-right: 1px solid var(--border);
@@ -52,6 +53,8 @@
             top: 0;
             left: 0;
             z-index: 100;
+            overflow-y: auto;
+            overflow-x: hidden;
         }
 
         .sidebar-brand {
@@ -688,10 +691,307 @@
         ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
         ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
 
+        /* ── Detection UI ───────────────────────────────────── */
+        .detection-stats-bar {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 14px;
+            margin-bottom: 20px;
+        }
+
+        .detection-stat {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 18px;
+            text-align: center;
+        }
+
+        .detection-stat-value {
+            font-size: 32px;
+            font-weight: 700;
+            letter-spacing: -.03em;
+        }
+
+        .detection-stat-label {
+            color: var(--text-secondary);
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: .06em;
+            margin-top: 6px;
+        }
+
+        .severity-critical { color: #ef4444; }
+        .severity-high     { color: #f59e0b; }
+        .severity-medium   { color: #a855f7; }
+        .severity-low      { color: #3b82f6; }
+        .severity-info     { color: #6b7280; }
+
+        .detection-alert-card {
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-left: 4px solid var(--text-muted);
+            border-radius: var(--radius-sm);
+            padding: 16px 20px;
+            margin-bottom: 12px;
+            animation: detSlideIn .3s ease;
+            transition: border-color var(--transition);
+        }
+
+        .detection-alert-card:hover { border-color: #3b4d6b; }
+
+        .detection-alert-card.sev-critical { border-left-color: #ef4444; }
+        .detection-alert-card.sev-high     { border-left-color: #f59e0b; }
+        .detection-alert-card.sev-medium   { border-left-color: #a855f7; }
+        .detection-alert-card.sev-low      { border-left-color: #3b82f6; }
+
+        .detection-alert-card.acknowledged { opacity: .7; }
+        .detection-alert-card.resolved     { opacity: .5; }
+
+        .detection-alert-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+        }
+
+        .detection-alert-header .det-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 2px 8px;
+            border-radius: 100px;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .det-badge.sev-critical { background: var(--red-bg); color: var(--red); }
+        .det-badge.sev-high     { background: var(--orange-bg); color: var(--orange); }
+        .det-badge.sev-medium   { background: var(--purple-bg); color: var(--purple); }
+        .det-badge.sev-low      { background: var(--accent-glow); color: var(--accent); }
+
+        .det-badge.type-badge {
+            background: var(--cyan-bg);
+            color: var(--cyan);
+        }
+
+        .det-badge.status-new  { background: var(--red-bg); color: var(--red); }
+        .det-badge.status-ack  { background: var(--orange-bg); color: var(--orange); }
+        .det-badge.status-res  { background: var(--green-bg); color: var(--green); }
+
+        .detection-alert-desc {
+            font-size: 13px;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+            line-height: 1.5;
+        }
+
+        .detection-alert-evidence {
+            font-size: 12px;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--text-secondary);
+            background: var(--bg-input);
+            padding: 10px 12px;
+            border-radius: var(--radius-sm);
+            margin-bottom: 10px;
+            max-height: 120px;
+            overflow-y: auto;
+        }
+
+        .detection-alert-footer {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        .detection-alert-actions {
+            display: flex;
+            gap: 6px;
+        }
+
+        @keyframes detSlideIn { from { transform: translateY(-8px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+        /* Rule editor cards */
+        .detection-rule-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 20px 24px;
+            margin-bottom: 16px;
+            transition: border-color var(--transition);
+        }
+
+        .detection-rule-card:hover { border-color: #313b50; }
+
+        .detection-rule-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 14px;
+        }
+
+        .detection-rule-title {
+            font-size: 14px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .detection-rule-params {
+            margin-top: 12px;
+        }
+
+        .detection-no-alerts {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--text-muted);
+            font-size: 14px;
+        }
+
+        /* ── Sidebar Toggle (mobile) ─────────────────────────── */
+        .sidebar-toggle {
+            display: flex;
+            position: fixed;
+            top: 36px;
+            left: 268px;
+            z-index: 200;
+            width: 32px;
+            height: 32px;
+            border-radius: var(--radius-sm);
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            font-size: 16px;
+            cursor: pointer;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            transition: left .3s ease, top .3s ease, width .3s ease, height .3s ease;
+        }
+
+        .sidebar-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 99;
+        }
+
+        /* ── Table scroll wrapper ────────────────────────────── */
+        .table-wrap {
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .table-wrap table {
+            min-width: 600px;
+        }
+
         /* ── Responsive ──────────────────────────────────────── */
         @media (max-width: 900px) {
             .sidebar { width: 220px; }
             .main { margin-left: 220px; padding: 24px; }
             .form-grid { grid-template-columns: 1fr; }
             .dashboard-chart-meta { flex-direction: column; }
+            .detection-stats-bar { grid-template-columns: repeat(2, 1fr); }
+            .sidebar-toggle { left: 228px; top: 28px; }
+        }
+
+        @media (max-width: 768px) {
+            .sidebar {
+                transform: translateX(-100%);
+                transition: transform .3s ease;
+                width: 260px;
+            }
+            .sidebar.open {
+                transform: translateX(0);
+            }
+            .sidebar-overlay.open {
+                display: block;
+            }
+            .sidebar-toggle {
+                left: 12px;
+                top: 16px;
+                width: 40px;
+                height: 40px;
+                font-size: 20px;
+            }
+            .main {
+                margin-left: 0;
+                padding: 20px 16px;
+                padding-top: 60px;
+                max-width: 100%;
+            }
+            .main-header {
+                flex-wrap: wrap;
+                gap: 12px;
+            }
+            .main-header h2 {
+                font-size: 18px;
+            }
+            .header-actions {
+                flex-wrap: wrap;
+            }
+            .detection-stats-bar {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            .card-title {
+                flex-wrap: wrap;
+                gap: 10px;
+            }
+            .card-title > span[style*="margin-left:auto"] {
+                margin-left: 0 !important;
+                flex-wrap: wrap;
+                display: flex;
+                gap: 8px;
+                width: 100%;
+            }
+            .toast-container {
+                left: 16px;
+                right: 16px;
+                top: auto;
+                bottom: 20px;
+            }
+            .toast {
+                min-width: auto;
+                width: 100%;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .main {
+                padding: 16px 12px;
+                padding-top: 56px;
+            }
+            .detection-stats-bar {
+                grid-template-columns: 1fr;
+            }
+            .dashboard-stat-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            .dashboard-stat-value {
+                font-size: 22px;
+            }
+            .detection-stat-value {
+                font-size: 24px;
+            }
+            .btn {
+                padding: 7px 12px;
+                font-size: 12px;
+            }
+            .routing-add-form > div {
+                flex: 1 1 100% !important;
+                min-width: auto !important;
+            }
+            .routing-add-form {
+                flex-direction: column;
+                align-items: stretch !important;
+            }
+            .routing-add-form button {
+                width: 100%;
+            }
         }

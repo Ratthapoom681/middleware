@@ -12,15 +12,12 @@ from __future__ import annotations
 
 import argparse
 import logging
-import os
 import sys
-from collections import deque
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
 import threading
-import uuid
 
 import yaml
 from flask import Flask, jsonify, request, send_from_directory
@@ -30,20 +27,12 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.main import MiddlewarePipeline
-from src.dashboard_history import create_dashboard_history_store
 from src.state_store import create_state_store
 from src.sources.wazuh_client import WazuhClient
+from src.pipeline.detection_store import DetectionAlertStore
 
 from src.config import (
     AppConfig,
-    WazuhConfig,
-    DefectDojoConfig,
-    RedmineConfig,
-    PipelineConfig,
-    FilterConfig,
-    DedupConfig,
-    EnrichmentConfig,
-    LoggingConfig,
     load_config,
     _build_config,
 )
@@ -425,38 +414,119 @@ def wazuh_webhook():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
-@app.route("/api/webhook/history", methods=["GET"])
-def get_webhook_history():
-    """
-    Returns the last 200 webhook events for the Live Events Dashboard.
-    """
+
+
+# ── Detection API Endpoints ──────────────────────────────────────────
+
+def _get_detection_store() -> DetectionAlertStore:
+    """Create a DetectionAlertStore from current config."""
+    config = load_config(str(CONFIG_PATH) if CONFIG_PATH.exists() else None)
+    return DetectionAlertStore(db_path=config.pipeline.detection.db_path)
+
+
+@app.route("/api/detection/alerts", methods=["GET"])
+def get_detection_alerts():
+    """List detection alerts with optional filters."""
     try:
-        config = load_config(str(CONFIG_PATH) if CONFIG_PATH.exists() else None)
-        state_store = create_state_store(config.storage)
-        history_store = create_dashboard_history_store(config.storage, state_store)
+        limit = request.args.get("limit", 100, type=int)
+        offset = request.args.get("offset", 0, type=int)
+        rule_type = request.args.get("rule_type")
+        severity = request.args.get("severity")
+        acknowledged = request.args.get("acknowledged")
+        resolved = request.args.get("resolved")
+
+        store = _get_detection_store()
         try:
-            history = history_store.get_dashboard_history(limit=200)
+            alerts = store.get_alerts(
+                limit=limit,
+                offset=offset,
+                rule_type=rule_type or None,
+                severity=severity or None,
+                acknowledged=bool(int(acknowledged)) if acknowledged is not None else None,
+                resolved=bool(int(resolved)) if resolved is not None else None,
+            )
         finally:
-            if history_store is not state_store:
-                history_store.close()
-            if state_store:
-                state_store.close()
+            store.close()
 
-        return jsonify({"status": "ok", "history": history}), 200
-    except Exception:
-        logger.exception("Failed to load dashboard history")
-        return jsonify({"status": "ok", "history": list(WEBHOOK_HISTORY)}), 200
+        return jsonify({"status": "ok", "alerts": alerts, "count": len(alerts)})
+    except Exception as e:
+        logger.exception("Failed to fetch detection alerts")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
-# ── Webhook Dashboard State ───────────────────────────────────────────
+@app.route("/api/detection/alerts/stats", methods=["GET"])
+def get_detection_stats():
+    """Get aggregate detection alert statistics."""
+    try:
+        store = _get_detection_store()
+        try:
+            stats = store.get_stats()
+        finally:
+            store.close()
+        return jsonify({"status": "ok", "stats": stats})
+    except Exception as e:
+        logger.exception("Failed to fetch detection stats")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
-# In-memory rolling log of the last 200 webhook events
-WEBHOOK_HISTORY = deque(maxlen=200)
+
+@app.route("/api/detection/alerts/<alert_id>/acknowledge", methods=["POST"])
+def acknowledge_detection_alert(alert_id: str):
+    """Mark a detection alert as acknowledged."""
+    try:
+        store = _get_detection_store()
+        try:
+            ok = store.acknowledge_alert(alert_id)
+        finally:
+            store.close()
+
+        if ok:
+            return jsonify({"status": "ok", "message": f"Alert {alert_id} acknowledged"})
+        else:
+            return jsonify({"status": "error", "message": "Alert not found"}), 404
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route("/api/detection/alerts/<alert_id>/resolve", methods=["POST"])
+def resolve_detection_alert(alert_id: str):
+    """Mark a detection alert as resolved."""
+    try:
+        store = _get_detection_store()
+        try:
+            ok = store.resolve_alert(alert_id)
+        finally:
+            store.close()
+
+        if ok:
+            return jsonify({"status": "ok", "message": f"Alert {alert_id} resolved"})
+        else:
+            return jsonify({"status": "error", "message": "Alert not found"}), 404
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 
 # ── API Routes (Config Manager) ──────────────────────────────────────────
 
 def _config_to_dict(config: AppConfig) -> dict:
     """Convert AppConfig to a plain dict."""
+    detection_dict = {
+        "enabled": config.pipeline.detection.enabled,
+        "alert_ttl_hours": config.pipeline.detection.alert_ttl_hours,
+        "max_state_entries": config.pipeline.detection.max_state_entries,
+        "db_path": config.pipeline.detection.db_path,
+        "rules": [
+            {
+                "name": r.name,
+                "type": r.type,
+                "enabled": r.enabled,
+                "severity": r.severity,
+                "parameters": r.parameters,
+                "cooldown_seconds": r.cooldown_seconds,
+                "create_ticket": r.create_ticket,
+            }
+            for r in config.pipeline.detection.rules
+        ],
+    }
     return {
         "wazuh": asdict(config.wazuh),
         "defectdojo": asdict(config.defectdojo),
@@ -468,6 +538,7 @@ def _config_to_dict(config: AppConfig) -> dict:
             "dedup": asdict(config.pipeline.dedup),
             "delivery": asdict(config.pipeline.delivery),
             "enrichment": asdict(config.pipeline.enrichment),
+            "detection": detection_dict,
         },
         "storage": asdict(config.storage),
         "logging": asdict(config.logging),
