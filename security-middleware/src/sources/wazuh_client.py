@@ -102,6 +102,7 @@ class WazuhClient:
     def _alert_to_finding(self, alert: dict[str, Any]) -> Optional[Finding]:
         """Convert a single Wazuh alert to a Finding."""
         try:
+            alert = self._normalize_alert_payload(alert)
             rule = alert.get("rule", {})
             agent = alert.get("agent", {})
             data = alert.get("data", {})
@@ -153,7 +154,7 @@ class WazuhClient:
 
             finding = Finding(
                 source=FindingSource.WAZUH,
-                source_id=alert.get("id", str(alert.get("_id", "unknown"))),
+                source_id=str(alert.get("id") or alert.get("_index_id") or alert.get("_id") or "unknown"),
                 title=rule.get("description", "Wazuh Alert"),
                 description="\n".join(description_parts),
                 severity=severity,
@@ -179,6 +180,26 @@ class WazuhClient:
         except Exception as e:
             logger.warning("Wazuh: failed to parse alert: %s", e)
             return None
+
+    def _normalize_alert_payload(self, alert: dict[str, Any]) -> dict[str, Any]:
+        """Unwrap Wazuh indexer hit payloads while preserving index metadata."""
+        if not isinstance(alert, dict):
+            return {}
+
+        source = alert.get("_source")
+        if isinstance(source, dict):
+            normalized = dict(source)
+            if alert.get("_index") is not None:
+                normalized["_index"] = alert.get("_index")
+            if alert.get("_id") is not None:
+                normalized["_index_id"] = alert.get("_id")
+            if alert.get("fields") is not None:
+                normalized["_fields"] = alert.get("fields")
+            if alert.get("sort") is not None:
+                normalized["_sort"] = alert.get("sort")
+            return normalized
+
+        return alert
 
     def _looks_like_failed_login(self, rule: dict[str, Any]) -> bool:
         """Infer failed-login status from common Wazuh authentication rule metadata."""

@@ -57,4 +57,66 @@ sudo /var/ossec/integrations/custom-security-middleware \
   http://MIDDLEWARE_HOST:5000/api/webhook/wazuh
 ```
 
+## Test Like Wazuh From This Repo
+
+Start the middleware webhook receiver:
+
+```bash
+python -m web.server --host 0.0.0.0 --port 5000
+```
+
+In another shell, simulate Wazuh calling the integration script for one failed-login event:
+
+```bash
+python tools/simulate_wazuh_integration.py \
+  --url http://127.0.0.1:5000/api/webhook/wazuh \
+  --usecase brute-force \
+  --count 1
+```
+
+By default the simulator sends a Wazuh indexer-style hit with `_index`, `_id`, and `_source`, matching the Fortigate alert shape in `samples/wazuh_fortigate_failed_login_indexer_hit.json`.
+
+Expected result: middleware returns success, unwraps `_source`, stores the raw Wazuh event, and does not create a Redmine ticket because one failed login does not match the brute-force threshold.
+
+Then simulate five unique failed-login alerts from the same source IP:
+
+```bash
+python tools/simulate_wazuh_integration.py \
+  --url http://127.0.0.1:5000/api/webhook/wazuh \
+  --usecase brute-force \
+  --srcip 10.0.0.50 \
+  --count 5
+```
+
+Expected result: the first four alerts are stored/evaluated only; the fifth alert matches the `brute_force` rule and only the generated detection alert is sent to Redmine.
+
+## Simulate Every Detection Use Case
+
+All simulator use cases are based on the Fortigate indexer-hit sample. The script only changes fields that the relevant rule needs.
+
+```bash
+# Brute force: 5 failed Fortigate admin logins from the same source IP.
+python tools/simulate_wazuh_integration.py --usecase brute-force
+
+# Abnormal port: one Fortigate event with data.dstport=4444.
+python tools/simulate_wazuh_integration.py --usecase abnormal-port
+
+# Impossible travel: two Fortigate admin login events from different GeoLocation countries.
+python tools/simulate_wazuh_integration.py --usecase impossible-travel
+
+# Port scan: 16 Fortigate events from one srcip with different data.dstport values.
+python tools/simulate_wazuh_integration.py --usecase port-scan
+
+# Run all of the above in sequence.
+python tools/simulate_wazuh_integration.py --usecase all
+```
+
+Current default ticketing behavior: only `brute-force` has `create_ticket: true` in `config/config.yaml`, so only that use case should create a Redmine issue. The other use cases should be stored as detection alerts but will not create Redmine tickets unless their rule has `create_ticket: true`.
+
+To test a raw Wazuh alert shape instead of the indexer/search-hit wrapper:
+
+```bash
+python tools/simulate_wazuh_integration.py --format raw --count 1
+```
+
 For the brute-force detection flow, keep the middleware rule `drop-raw-wazuh-failed-logins` enabled. Wazuh sends the raw failed-login alerts immediately, the detection engine counts them, and only the generated `brute_force` alert should create a Redmine ticket.

@@ -1,0 +1,73 @@
+{
+  "_index": "wazuh-alerts-4.x-2026.04.29",
+  "_id": "yHCX2J0Byl_n48-Tu3Ro",
+  "_score": null,
+  "_source": {
+    "input": {
+      "type": "log"
+    },
+    "agent": {
+      "name": "wazuh-server",
+      "id": "000"
+    },
+    "manager": {
+      "name": "wazuh-server"
+    },
+    "data": {
+      "msg": "Administrator admin login failed from https(85.11.187.20) because of blocked IP",
+      "devid": "FGT80FTK21009527",
+      "reason": "ip_blocked",
+      "srcip": "85.11.187.20",
+      "method": "https",
+      "level": "alert",
+      "ip": "85.11.187.20",
+      "eventtime": "1777455314176158989",
+      "type": "event",
+      "vd": "root",
+      "logdesc": "Admin login failed",
+      "protocol": "\"https\"",
+      "subtype": "system",
+      "dstuser": "admin",
+      "action": "login",
+      "logid": "0100032002",
+      "devname": "BCH-FG80F_NS2",
+      "dstip": "223.27.209.82",
+      "sn": "0",
+      "time": "16:35:13",
+      "status": "failed"
+    },
+    "rule": {
+      "firedtimes": 1653,
+      "mail": false,
+      "level": 4,
+      "hipaa": ["164.312.b"],
+      "pci_dss": ["10.2.4", "10.2.5"],
+      "description": "Fortigate: Login failed.",
+      "groups": ["fortigate", "syslog", "authentication_failed", "invalid_login"],
+      "id": "81606",
+      "nist_800_53": ["AC.7", "AU.14"],
+      "gdpr": ["IV_32.2", "IV_35.7.d"],
+      "gpg13": ["7.1"]
+    },
+    "location": "119.63.75.68",
+    "decoder": {
+      "name": "fortigate-firewall-v6"
+    },
+    "id": "1777455314.24749104",
+    "GeoLocation": {
+      "city_name": "Sofia",
+      "country_name": "Bulgaria",
+      "region_name": "Sofia-Capital",
+      "location": {
+        "lon": 23.3175,
+        "lat": 42.683
+      }
+    },
+    "full_log": "logver=700170682 timestamp=1777455313 devname=\"BCH-FG80F_NS2\" devid=\"FGT80FTK21009527\" vd=\"root\" date=2026-04-29 time=16:35:13 eventtime=1777455314176158989 tz=\"+0700\" logid=\"0100032002\" type=\"event\" subtype=\"system\" level=\"alert\" logdesc=\"Admin login failed\" sn=\"0\" user=\"admin\" ui=\"https(85.11.187.20)\" method=\"https\" srcip=85.11.187.20 dstip=223.27.209.82 action=\"login\" status=\"failed\" reason=\"ip_blocked\" msg=\"Administrator admin login failed from https(85.11.187.20) because of blocked IP\"",
+    "timestamp": "2026-04-29T09:35:14.476+0000"
+  },
+  "fields": {
+    "timestamp": ["2026-04-29T09:35:14.476Z"]
+  },
+  "sort": [1777455314476]
+}

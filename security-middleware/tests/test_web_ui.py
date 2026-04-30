@@ -368,16 +368,29 @@ def test_wazuh_webhook_processes_payload_through_pipeline(workspace_tmp_dir, mon
         response = client.post(
             "/api/webhook/wazuh",
             json={
-                "id": "alert-1",
-                "timestamp": "2026-04-30T01:00:00+00:00",
-                "rule": {
-                    "id": "5710",
-                    "level": 7,
-                    "description": "Failed login",
-                    "groups": ["authentication_failed"],
+                "_index": "wazuh-alerts-4.x-2026.04.29",
+                "_id": "yHCX2J0Byl_n48-Tu3Ro",
+                "_source": {
+                    "id": "1777455314.24749104",
+                    "timestamp": "2026-04-29T09:35:14.476+0000",
+                    "rule": {
+                        "id": "81606",
+                        "level": 4,
+                        "description": "Fortigate: Login failed.",
+                        "groups": ["fortigate", "syslog", "authentication_failed", "invalid_login"],
+                    },
+                    "agent": {"name": "wazuh-server", "id": "000"},
+                    "decoder": {"name": "fortigate-firewall-v6"},
+                    "data": {
+                        "srcip": "85.11.187.20",
+                        "dstip": "223.27.209.82",
+                        "dstuser": "admin",
+                        "devname": "BCH-FG80F_NS2",
+                        "action": "login",
+                        "status": "failed",
+                    },
                 },
-                "agent": {"name": "web-01", "ip": "10.0.0.10"},
-                "data": {"srcip": "10.0.0.1"},
+                "fields": {"timestamp": ["2026-04-29T09:35:14.476Z"]},
             },
         )
 
@@ -386,8 +399,13 @@ def test_wazuh_webhook_processes_payload_through_pipeline(workspace_tmp_dir, mon
     assert payload["status"] == "ok"
     assert payload["stats"]["ingested"] == 1
     assert captured["findings"][0].source.value == "wazuh"
-    assert captured["findings"][0].title == "Failed login"
+    assert captured["findings"][0].source_id == "1777455314.24749104"
+    assert captured["findings"][0].title == "Fortigate: Login failed."
+    assert captured["findings"][0].host == "BCH-FG80F_NS2"
+    assert captured["findings"][0].srcip == "85.11.187.20"
     assert captured["findings"][0].raw_data["data"]["status"] == "failed"
+    assert captured["findings"][0].raw_data["_index"] == "wazuh-alerts-4.x-2026.04.29"
+    assert captured["findings"][0].raw_data["_index_id"] == "yHCX2J0Byl_n48-Tu3Ro"
     assert captured["event_context"] == {
         "origin": "webhook",
         "alert_count": 1,

@@ -130,6 +130,16 @@ sudo systemctl restart wazuh-manager
 
 See [docs/wazuh-integration.md](docs/wazuh-integration.md) for the full setup notes.
 
+To test the flow like Wazuh without generating real SSH failures, run the middleware server and use:
+
+```bash
+python tools/simulate_wazuh_integration.py --usecase brute-force --count 1
+python tools/simulate_wazuh_integration.py --usecase brute-force --count 5
+python tools/simulate_wazuh_integration.py --usecase all
+```
+
+The simulator defaults to a Fortigate failed-login Wazuh indexer-hit payload with `_source`, like `samples/wazuh_fortigate_failed_login_indexer_hit.json`.
+
 ### 4. Docker
 
 ```bash
