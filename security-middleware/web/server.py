@@ -425,18 +425,60 @@ def _get_detection_store() -> DetectionAlertStore:
     return DetectionAlertStore(db_path=config.pipeline.detection.db_path)
 
 
+def _check_alerts_against_redmine(
+    alerts: list[dict],
+    store: DetectionAlertStore,
+    config: AppConfig,
+) -> list[dict]:
+    """Refresh Redmine linkage for returned detection alerts."""
+    redmine = RedmineClient(config.redmine)
+    refreshed: list[dict] = []
+    for alert in alerts:
+        issue_id = alert.get("redmine_issue_id")
+        if not issue_id:
+            refreshed.append(alert)
+            continue
+
+        try:
+            redmine_status = redmine.check_issue(int(issue_id))
+            exists = bool(redmine_status.get("exists"))
+            is_closed = bool(redmine_status.get("is_closed")) if redmine_status.get("is_closed") is not None else False
+            local_resolved = (not exists) or is_closed
+            store.update_redmine_issue(
+                str(alert["id"]),
+                issue_id=int(issue_id),
+                exists=exists,
+                status=str(redmine_status.get("status") or ("open" if exists else "deleted")),
+                resolved=local_resolved,
+            )
+            refreshed_alert = store.get_alert_by_id(str(alert["id"]))
+            refreshed.append(refreshed_alert or alert)
+        except Exception as exc:
+            logger.warning(
+                "Failed to refresh Redmine issue #%s for detection alert %s: %s",
+                issue_id,
+                alert.get("id"),
+                exc,
+            )
+            refreshed.append(alert)
+
+    return refreshed
+
+
 @app.route("/api/detection/alerts", methods=["GET"])
 def get_detection_alerts():
     """List detection alerts with optional filters."""
     try:
+        config = load_config(str(CONFIG_PATH) if CONFIG_PATH.exists() else None)
         limit = request.args.get("limit", 100, type=int)
         offset = request.args.get("offset", 0, type=int)
         rule_type = request.args.get("rule_type")
         severity = request.args.get("severity")
         acknowledged = request.args.get("acknowledged")
         resolved = request.args.get("resolved")
+        check_redmine = request.args.get("check_redmine", "0") in {"1", "true", "yes"}
 
-        store = _get_detection_store()
+        store = DetectionAlertStore(db_path=config.pipeline.detection.db_path)
         try:
             alerts = store.get_alerts(
                 limit=limit,
@@ -446,6 +488,8 @@ def get_detection_alerts():
                 acknowledged=bool(int(acknowledged)) if acknowledged is not None else None,
                 resolved=bool(int(resolved)) if resolved is not None else None,
             )
+            if check_redmine:
+                alerts = _check_alerts_against_redmine(alerts, store, config)
         finally:
             store.close()
 

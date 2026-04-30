@@ -60,7 +60,7 @@ def config():
                 enabled=True,
                 cooldown_seconds=0,
                 parameters={
-                    "threshold": 3,
+                    "threshold": 4,
                     "window_seconds": 60,
                     "group_by": "srcip",
                     "port_field": "dstport"
@@ -176,6 +176,45 @@ def test_impossible_travel_detection(engine):
     assert alerts[0].evidence["country_2"] == "US"
 
 
+def test_impossible_travel_persists_window_across_engine_instances(config, memory_store):
+    ts1 = datetime.fromtimestamp(time.time() - 100, timezone.utc)
+    ts2 = datetime.fromtimestamp(time.time(), timezone.utc)
+
+    first_engine = DetectionEngine(config)
+    first_engine.set_alert_store(memory_store)
+    second_engine = DetectionEngine(config)
+    second_engine.set_alert_store(memory_store)
+
+    f1 = Finding(
+        source=FindingSource.WAZUH,
+        source_id="travel-1",
+        title="Login",
+        description="Test login",
+        severity=Severity.INFO,
+        timestamp=ts1,
+        srcip="1.1.1.1",
+        src_country="US",
+        raw_data={"data": {"user": "alice"}},
+    )
+    f2 = Finding(
+        source=FindingSource.WAZUH,
+        source_id="travel-2",
+        title="Login",
+        description="Test login",
+        severity=Severity.INFO,
+        timestamp=ts2,
+        srcip="2.2.2.2",
+        src_country="CN",
+        raw_data={"data": {"user": "alice"}},
+    )
+
+    assert first_engine.evaluate([f1]) == []
+    alerts = second_engine.evaluate([f2])
+
+    assert len(alerts) == 1
+    assert alerts[0].rule_type == "impossible_travel"
+
+
 def test_port_scan_detection(engine):
     findings = []
     # Connect to 3 distinct ports -> no alert (threshold is 3)
@@ -212,3 +251,72 @@ def test_port_scan_detection(engine):
     assert alerts[0].rule_type == "port_scan"
     assert alerts[0].evidence["distinct_port_count"] == 4
     assert alerts[0].evidence["source_ip"] == "192.168.1.100"
+
+
+def test_port_scan_persists_window_across_engine_instances(config, memory_store):
+    ports = ["22", "80", "443", "8080"]
+    alerts = []
+
+    for index, port in enumerate(ports, start=1):
+        engine = DetectionEngine(config)
+        engine.set_alert_store(memory_store)
+        alerts = engine.evaluate([Finding(
+            source=FindingSource.WAZUH,
+            source_id=f"scan-{index}",
+            title="Conn",
+            description="Test conn",
+            severity=Severity.INFO,
+            timestamp=datetime.now(timezone.utc),
+            srcip="192.168.1.100",
+            dstport=port,
+            raw_data={},
+        )])
+
+    assert len(alerts) == 1
+    assert alerts[0].rule_type == "port_scan"
+    assert alerts[0].evidence["distinct_port_count"] == 4
+
+def test_cooldown_persists_across_engine_instances(config, memory_store):
+    # Set cooldown high enough
+    for rule in config.rules:
+        if rule.type == "port_scan":
+            rule.cooldown_seconds = 300
+
+    ports = ["22", "80", "443", "8080"]
+    alerts = []
+    
+    # Engine 1: Trigger the alert
+    for index, port in enumerate(ports, start=1):
+        engine1 = DetectionEngine(config)
+        engine1.set_alert_store(memory_store)
+        alerts = engine1.evaluate([Finding(
+            source=FindingSource.WAZUH,
+            source_id=f"scan-{index}",
+            title="Conn",
+            description="Test conn",
+            severity=Severity.INFO,
+            timestamp=datetime.now(timezone.utc),
+            srcip="192.168.1.200",
+            dstport=port,
+            raw_data={},
+        )])
+
+    assert len(alerts) == 1
+    
+    # Engine 2: Send another port that would normally trigger it again, but cooldown should block it
+    engine2 = DetectionEngine(config)
+    engine2.set_alert_store(memory_store)
+    alerts = engine2.evaluate([Finding(
+        source=FindingSource.WAZUH,
+        source_id="scan-5",
+        title="Conn",
+        description="Test conn",
+        severity=Severity.INFO,
+        timestamp=datetime.now(timezone.utc),
+        srcip="192.168.1.200",
+        dstport="9090",
+        raw_data={},
+    )])
+
+    # Cooldown should prevent the second alert
+    assert len(alerts) == 0

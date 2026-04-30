@@ -1118,19 +1118,77 @@ function renderDetectionRules() {
                     <span class="toggle-track"></span>
                 </label>
             </div>
-            <div style="font-size:12px; color:var(--text-secondary); margin-bottom:10px;">
-                Cooldown: ${rule.cooldown_seconds}s &bull; Severity: ${escapeHtml(rule.severity)} &bull; Create Ticket: ${rule.create_ticket ? 'Yes' : 'No'}
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin-bottom:12px;">
+                <div class="form-group" style="margin-bottom:0;">
+                    <label>Severity</label>
+                    <select class="rule-severity-select" data-idx="${idx}">
+                        ${['critical', 'high', 'medium', 'low', 'info'].map(sev => `<option value="${sev}" ${rule.severity === sev ? 'selected' : ''}>${sev}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="form-group" style="margin-bottom:0;">
+                    <label>Cooldown Seconds</label>
+                    <input type="number" min="0" class="rule-cooldown-input" data-idx="${idx}" value="${Number(rule.cooldown_seconds || 0)}">
+                </div>
+                <div class="toggle-row" style="margin:0; padding:10px; border:1px solid var(--border); border-radius:6px;">
+                    <div>
+                        <div class="toggle-label">Create Redmine Ticket</div>
+                        <div class="toggle-desc">Send this detection alert to Redmine when it fires</div>
+                    </div>
+                    <label class="toggle">
+                        <input type="checkbox" class="rule-ticket-toggle" data-idx="${idx}" ${rule.create_ticket ? 'checked' : ''}>
+                        <span class="toggle-track"></span>
+                    </label>
+                </div>
             </div>
-            <div class="detection-rule-params yaml-preview" style="padding:10px; border-radius:4px;">${escapeHtml(JSON.stringify(rule.parameters, null, 2))}</div>
+            <div class="form-group" style="margin-bottom:0;">
+                <label>Rule Parameters</label>
+                <textarea class="yaml-preview rule-params-input" data-idx="${idx}" spellcheck="false" style="width:100%; min-height:120px; resize:vertical;">${escapeHtml(JSON.stringify(rule.parameters || {}, null, 2))}</textarea>
+            </div>
         </div>
     `).join('');
 
-    // Bind toggles
     container.querySelectorAll('.rule-enabled-toggle').forEach(el => {
         el.addEventListener('change', (e) => {
             const idx = parseInt(e.target.dataset.idx, 10);
             if (localDetectionRules[idx]) {
                 localDetectionRules[idx].enabled = e.target.checked;
+            }
+        });
+    });
+    container.querySelectorAll('.rule-ticket-toggle').forEach(el => {
+        el.addEventListener('change', (e) => {
+            const idx = parseInt(e.target.dataset.idx, 10);
+            if (localDetectionRules[idx]) {
+                localDetectionRules[idx].create_ticket = e.target.checked;
+            }
+        });
+    });
+    container.querySelectorAll('.rule-severity-select').forEach(el => {
+        el.addEventListener('change', (e) => {
+            const idx = parseInt(e.target.dataset.idx, 10);
+            if (localDetectionRules[idx]) {
+                localDetectionRules[idx].severity = e.target.value;
+            }
+        });
+    });
+    container.querySelectorAll('.rule-cooldown-input').forEach(el => {
+        el.addEventListener('change', (e) => {
+            const idx = parseInt(e.target.dataset.idx, 10);
+            if (localDetectionRules[idx]) {
+                localDetectionRules[idx].cooldown_seconds = parseInt(e.target.value || '0', 10);
+            }
+        });
+    });
+    container.querySelectorAll('.rule-params-input').forEach(el => {
+        el.addEventListener('change', (e) => {
+            const idx = parseInt(e.target.dataset.idx, 10);
+            if (!localDetectionRules[idx]) return;
+            try {
+                localDetectionRules[idx].parameters = JSON.parse(e.target.value || '{}');
+                e.target.style.borderColor = '';
+            } catch (err) {
+                e.target.style.borderColor = 'var(--red)';
+                toast(`Invalid JSON in ${localDetectionRules[idx].name} parameters`, 'error');
             }
         });
     });
@@ -1142,26 +1200,13 @@ async function loadDetectionAlerts() {
 
     feed.innerHTML = '<div style="text-align:center; padding: 40px; color:var(--text-muted);">Loading alerts...</div>';
 
-    // Fetch Stats
-    try {
-        const statsRes = await fetch('/api/detection/alerts/stats');
-        const statsData = await statsRes.json();
-        if (statsData.status === 'ok' && statsData.stats) {
-            setText('det-stat-total', statsData.stats.total || 0);
-            setText('det-stat-active', statsData.stats.active || 0);
-            setText('det-stat-ack', statsData.stats.acknowledged || 0);
-            setText('det-stat-resolved', statsData.stats.resolved || 0);
-        }
-    } catch (e) {
-        console.error('Failed to load detection stats:', e);
-    }
-
-    // Fetch Alerts
+    // Fetch Alerts first; this also refreshes linked Redmine issue state.
+    let refreshedStatsAfterAlerts = false;
     try {
         const typeFilter = getVal('det-filter-type');
         const sevFilter = getVal('det-filter-severity');
         
-        let url = '/api/detection/alerts?limit=50';
+        let url = '/api/detection/alerts?limit=50&check_redmine=1';
         if (typeFilter) url += '&rule_type=' + encodeURIComponent(typeFilter);
         if (sevFilter) url += '&severity=' + encodeURIComponent(sevFilter);
 
@@ -1200,9 +1245,6 @@ async function loadDetectionAlerts() {
             }
 
             let actionsHtml = '';
-            if (redmineIssueId) {
-                actionsHtml += `<button class="btn btn-sm" onclick="checkDetectionAlertRedmine('${alert.id}')">Check Redmine</button>`;
-            }
             if (!isResolved) {
                 actionsHtml += `<button class="btn btn-sm btn-success" onclick="resolveDetectionAlert('${alert.id}')">&#10003; Resolve</button>`;
                 if (!isAck) {
@@ -1227,24 +1269,24 @@ async function loadDetectionAlerts() {
                 </div>
             `;
         }).join('');
+        refreshedStatsAfterAlerts = true;
 
     } catch (e) {
         feed.innerHTML = `<div style="text-align:center; padding: 20px; color:var(--red);">Failed to load alerts: ${e.message}</div>`;
     }
-}
 
-async function checkDetectionAlertRedmine(id) {
+    // Fetch Stats after alert reconciliation so deleted/closed Redmine issues are reflected.
     try {
-        const res = await fetch(`/api/detection/alerts/${id}/check-redmine`, { method: 'POST' });
-        const data = await res.json();
-        if (data.status === 'ok') {
-            toast(data.message || 'Redmine issue checked', 'success');
-            loadDetectionAlerts();
-        } else {
-            toast('Error: ' + data.message, 'error');
+        const statsRes = await fetch('/api/detection/alerts/stats');
+        const statsData = await statsRes.json();
+        if (statsData.status === 'ok' && statsData.stats) {
+            setText('det-stat-total', statsData.stats.total || 0);
+            setText('det-stat-active', statsData.stats.active || 0);
+            setText('det-stat-ack', statsData.stats.acknowledged || 0);
+            setText('det-stat-resolved', statsData.stats.resolved || 0);
         }
     } catch (e) {
-        toast('Network error', 'error');
+        if (refreshedStatsAfterAlerts) console.error('Failed to load detection stats:', e);
     }
 }
 

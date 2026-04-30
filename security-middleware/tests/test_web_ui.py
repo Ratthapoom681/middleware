@@ -294,6 +294,9 @@ def test_static_ui_assets_reflect_webhook_only_wazuh_and_new_defectdojo_fields()
         "filter-example-defectdojo",
         "getJsonTextareaValue",
         "loadJsonRuleExample",
+        "rule-ticket-toggle",
+        "Create Redmine Ticket",
+        "check_redmine=1",
         "storage-backend",
         "storage-postgres_dsn",
         "storage-postgres_schema",
@@ -318,6 +321,7 @@ def test_static_ui_assets_reflect_webhook_only_wazuh_and_new_defectdojo_fields()
         "wazuh-alerts_json_path",
         "latestWebhookHistory",
         "/api/webhook/history",
+        "Check Redmine</button>",
     ]:
         assert removed_token not in assets
 
@@ -488,3 +492,74 @@ def test_detection_alert_check_redmine_marks_missing_issue_resolved(workspace_tm
     assert payload["alert"]["acknowledged"] is True
     assert payload["alert"]["redmine_issue_exists"] is False
     assert payload["alert"]["redmine_issue_status"] == "deleted"
+
+
+@responses.activate
+def test_detection_alert_list_auto_checks_redmine_and_marks_missing_issue_resolved(workspace_tmp_dir, monkeypatch):
+    config_path = workspace_tmp_dir / "config.yaml"
+    detection_db = workspace_tmp_dir / "detection_alerts_list.db"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "redmine": {
+                    "base_url": "http://redmine-test",
+                    "api_key": "test-key",
+                    "project_id": "security-incidents",
+                    "tracker_id": 1,
+                },
+                "pipeline": {
+                    "detection": {
+                        "enabled": True,
+                        "db_path": str(detection_db),
+                    }
+                },
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(server, "CONFIG_PATH", config_path)
+
+    store = DetectionAlertStore(db_path=str(detection_db))
+    try:
+        store.save_alert(
+            SimpleNamespace(
+                id="alert-auto-check",
+                rule_name="Brute Force Login Detection",
+                rule_type="brute_force",
+                severity="high",
+                description="Brute force detected",
+                evidence={"source_ip": "10.0.0.50"},
+                source_events=[],
+                triggered_at="2026-04-30T01:00:00+00:00",
+                acknowledged=False,
+                resolved=False,
+                create_ticket=True,
+            )
+        )
+        store.update_redmine_issue(
+            "alert-auto-check",
+            issue_id=777,
+            exists=True,
+            status="open",
+            resolved=False,
+        )
+    finally:
+        store.close()
+
+    responses.add(
+        responses.GET,
+        "http://redmine-test/issues/777.json",
+        status=404,
+    )
+
+    with server.app.test_client() as client:
+        response = client.get("/api/detection/alerts?check_redmine=1")
+
+    assert response.status_code == 200
+    alert = response.get_json()["alerts"][0]
+    assert alert["id"] == "alert-auto-check"
+    assert alert["resolved"] is True
+    assert alert["acknowledged"] is True
+    assert alert["redmine_issue_exists"] is False
+    assert alert["redmine_issue_status"] == "deleted"

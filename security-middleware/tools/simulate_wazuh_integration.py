@@ -113,6 +113,8 @@ def build_alert(
     elif scenario == "port-scan":
         data["dstport"] = str(20000 + scenario_index)
         data["service"] = f"tcp/{data['dstport']}"
+        data["status"] = "success"  # Prevent triggering brute-force
+        data["action"] = "connection"
         data["msg"] = f"Fortigate connection attempt from {srcip} to {data['dstip']}:{data['dstport']}"
         rule["description"] = "Fortigate: Multiple destination ports."
         rule["groups"] = ["fortigate", "syslog", "network", "connection"]

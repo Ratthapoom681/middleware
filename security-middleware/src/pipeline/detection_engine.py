@@ -148,21 +148,35 @@ class CooldownTracker:
     def __init__(self):
         # (rule_name, cooldown_key) -> last_trigger_epoch
         self._cooldowns: dict[tuple[str, str], float] = {}
+        self._store: Any = None
+
+    def set_store(self, store: Any) -> None:
+        """Set the persistent store for cooldowns."""
+        self._store = store
+
+    def _get_last_trigger(self, rule_name: str, key: str) -> float:
+        if self._store and hasattr(self._store, "get_cooldown"):
+            val = self._store.get_cooldown(rule_name, key)
+            if val is not None:
+                return val
+        cache_key = (rule_name, key)
+        return self._cooldowns.get(cache_key, 0.0)
 
     def is_cooled_down(self, rule_name: str, key: str, cooldown_seconds: int) -> bool:
         """Check if this rule+key combination is still in cooldown."""
-        cache_key = (rule_name, key)
-        last_trigger = self._cooldowns.get(cache_key, 0.0)
+        last_trigger = self._get_last_trigger(rule_name, key)
         return (time.time() - last_trigger) < cooldown_seconds
 
     def record_trigger(self, rule_name: str, key: str) -> None:
         """Record that this rule+key was triggered now."""
-        self._cooldowns[(rule_name, key)] = time.time()
+        now = time.time()
+        self._cooldowns[(rule_name, key)] = now
+        if self._store and hasattr(self._store, "save_cooldown"):
+            self._store.save_cooldown(rule_name, key, now)
 
     def remaining_seconds(self, rule_name: str, key: str, cooldown_seconds: int) -> float:
         """Get remaining cooldown seconds."""
-        cache_key = (rule_name, key)
-        last_trigger = self._cooldowns.get(cache_key, 0.0)
+        last_trigger = self._get_last_trigger(rule_name, key)
         remaining = cooldown_seconds - (time.time() - last_trigger)
         return max(0.0, remaining)
 
@@ -213,6 +227,7 @@ class DetectionEngine:
     def set_alert_store(self, store: Any) -> None:
         """Set the alert persistence store."""
         self._alert_store = store
+        self._cooldowns.set_store(store)
 
     def evaluate(self, findings: list[Finding]) -> list[DetectionAlert]:
         """
@@ -468,17 +483,42 @@ class DetectionEngine:
             return []
 
         # Add to sliding window
-        state = self._rule_states[rule.name]
         event_ts = finding.timestamp.timestamp()
-        state.add_event(user, event_ts, {
+        event_payload = {
             "country": country,
             "srcip": finding.srcip,
             "timestamp": finding.timestamp.isoformat(),
+            "event_epoch": event_ts,
             "host": finding.host,
-        })
+        }
+
+        window_start = event_ts - params.get("window_seconds", max_travel_seconds)
+        if self._alert_store and hasattr(self._alert_store, "save_rule_event"):
+            self._alert_store.save_rule_event(
+                rule_name=rule.name,
+                rule_type=rule.type,
+                group_key=str(user),
+                event_epoch=event_ts,
+                finding=finding,
+                event_data=event_payload,
+            )
+            persisted_events = self._alert_store.get_rule_events(
+                rule.name,
+                str(user),
+                window_start,
+                event_ts,
+                limit=max(self.config.max_state_entries, 100),
+            )
+            events_in_window = [
+                (float(ev.get("event_epoch", event_ts) or event_ts), ev)
+                for ev in persisted_events
+            ]
+        else:
+            state = self._rule_states[rule.name]
+            state.add_event(str(user), event_ts, event_payload)
+            events_in_window = state.get_events(str(user), event_ts)
 
         # Check for travel — look at all events in window
-        events_in_window = state.get_events(user, event_ts)
         countries_seen: dict[str, tuple[float, str]] = {}  # country -> (timestamp, srcip)
 
         for ev_ts, ev_data in events_in_window:
@@ -555,25 +595,51 @@ class DetectionEngine:
         if not port_value:
             return []
 
-        # Add event
-        state = self._rule_states[rule.name]
         event_ts = finding.timestamp.timestamp()
-        state.add_event(group_key, event_ts, {
+        event_payload = {
             "dstport": str(port_value),
             "dstip": finding.dstip or self._resolve_field(finding, "dstip") or "",
             "srcip": finding.srcip,
             "timestamp": finding.timestamp.isoformat(),
+            "event_epoch": event_ts,
             "host": finding.host,
-        })
+        }
 
-        # Count distinct ports
-        distinct_ports = state.distinct_values(group_key, "dstport", event_ts)
+        window_seconds = params.get("window_seconds", 60)
+        window_start = event_ts - window_seconds
+        if self._alert_store and hasattr(self._alert_store, "save_rule_event"):
+            self._alert_store.save_rule_event(
+                rule_name=rule.name,
+                rule_type=rule.type,
+                group_key=group_key,
+                event_epoch=event_ts,
+                finding=finding,
+                event_data=event_payload,
+            )
+            events_in_window = self._alert_store.get_rule_events(
+                rule.name,
+                group_key,
+                window_start,
+                event_ts,
+                limit=max(int(threshold) + 20, 100),
+            )
+            distinct_ports = {
+                str(ev.get("dstport", "")).strip()
+                for ev in events_in_window
+                if str(ev.get("dstport", "")).strip()
+            }
+        else:
+            state = self._rule_states[rule.name]
+            state.add_event(group_key, event_ts, event_payload)
+            distinct_ports = state.distinct_values(group_key, "dstport", event_ts)
+            events_in_window = [ev for _, ev in state.get_events(group_key, event_ts)]
+
         logger.debug(
             "Detection: rule '%s' state for key '%s': %d distinct ports in window",
             rule.name, group_key, len(distinct_ports),
         )
 
-        if len(distinct_ports) > threshold:
+        if len(distinct_ports) >= threshold:
             if self._cooldowns.is_cooled_down(rule.name, group_key, rule.cooldown_seconds):
                 remaining = self._cooldowns.remaining_seconds(rule.name, group_key, rule.cooldown_seconds)
                 logger.debug(
@@ -583,7 +649,6 @@ class DetectionEngine:
                 return []
 
             self._cooldowns.record_trigger(rule.name, group_key)
-            events_in_window = state.get_events(group_key, event_ts)
 
             alert = DetectionAlert(
                 id=str(uuid4()),
@@ -592,7 +657,7 @@ class DetectionEngine:
                 severity=rule.severity,
                 description=(
                     f"Port scan detected: {group_key} connected to {len(distinct_ports)} "
-                    f"distinct ports within {params.get('window_seconds', 60)}s "
+                    f"distinct ports within {window_seconds}s "
                     f"(threshold: {threshold})"
                 ),
                 evidence={
@@ -600,9 +665,9 @@ class DetectionEngine:
                     "distinct_port_count": len(distinct_ports),
                     "ports_sample": sorted(list(distinct_ports))[:20],
                     "threshold": threshold,
-                    "window_seconds": params.get("window_seconds", 60),
+                    "window_seconds": window_seconds,
                 },
-                source_events=[ev for _, ev in events_in_window[-10:]],
+                source_events=events_in_window[-10:],
                 triggered_at=datetime.now(timezone.utc).isoformat(),
                 create_ticket=rule.create_ticket,
             )

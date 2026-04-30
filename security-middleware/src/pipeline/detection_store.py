@@ -7,6 +7,7 @@ acknowledgment, and lifecycle management via the REST API.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import sqlite3
@@ -62,6 +63,13 @@ CREATE TABLE IF NOT EXISTS wazuh_events (
     created_epoch REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_wazuh_events_event_epoch ON wazuh_events(event_epoch);
+
+CREATE TABLE IF NOT EXISTS detection_cooldowns (
+    rule_name TEXT NOT NULL,
+    cooldown_key TEXT NOT NULL,
+    triggered_epoch REAL NOT NULL,
+    PRIMARY KEY (rule_name, cooldown_key)
+);
 """
 
 
@@ -100,6 +108,16 @@ class DetectionAlertStore:
         for column, statement in migrations.items():
             if column not in existing:
                 self._conn.execute(statement)
+
+        # Create detection_cooldowns if it doesn't exist (it's in _SCHEMA but need to handle old DBs safely)
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS detection_cooldowns (
+                rule_name TEXT NOT NULL,
+                cooldown_key TEXT NOT NULL,
+                triggered_epoch REAL NOT NULL,
+                PRIMARY KEY (rule_name, cooldown_key)
+            )
+        """)
 
     def save_alert(self, alert: Any) -> None:
         """Persist a detection alert."""
@@ -191,7 +209,10 @@ class DetectionAlertStore:
 
         source = getattr(getattr(finding, "source", None), "value", str(getattr(finding, "source", "")))
         source_id = str(getattr(finding, "source_id", ""))
-        event_id = f"{rule_name}:{source}:{source_id}"
+        event_fingerprint = hashlib.sha256(
+            json.dumps(event_data, sort_keys=True, default=str).encode("utf-8")
+        ).hexdigest()[:16]
+        event_id = f"{rule_name}:{source}:{source_id}:{float(event_epoch):.6f}:{event_fingerprint}"
         self._conn.execute(
             """
             INSERT OR IGNORE INTO detection_events
@@ -434,11 +455,42 @@ class DetectionAlertStore:
             "DELETE FROM wazuh_events WHERE created_epoch < ?",
             (cutoff,),
         )
+        cooldown_cursor = self._conn.execute(
+            "DELETE FROM detection_cooldowns WHERE triggered_epoch < ?",
+            (cutoff,),
+        )
         self._conn.commit()
-        count = cursor.rowcount + event_cursor.rowcount + wazuh_cursor.rowcount
+        count = cursor.rowcount + event_cursor.rowcount + wazuh_cursor.rowcount + cooldown_cursor.rowcount
         if count > 0:
-            logger.info("Detection: cleaned up %d expired alerts/events", count)
+            logger.info("Detection: cleaned up %d expired alerts/events/cooldowns", count)
         return count
+
+    def save_cooldown(self, rule_name: str, cooldown_key: str, triggered_epoch: float) -> None:
+        """Persist a rule cooldown state."""
+        if not self._conn:
+            return
+
+        self._conn.execute(
+            """
+            INSERT OR REPLACE INTO detection_cooldowns
+            (rule_name, cooldown_key, triggered_epoch)
+            VALUES (?, ?, ?)
+            """,
+            (rule_name, cooldown_key, float(triggered_epoch)),
+        )
+        self._conn.commit()
+
+    def get_cooldown(self, rule_name: str, cooldown_key: str) -> float | None:
+        """Retrieve the last triggered epoch for a rule cooldown key."""
+        if not self._conn:
+            return None
+
+        cursor = self._conn.execute(
+            "SELECT triggered_epoch FROM detection_cooldowns WHERE rule_name = ? AND cooldown_key = ?",
+            (rule_name, cooldown_key),
+        )
+        row = cursor.fetchone()
+        return float(row["triggered_epoch"]) if row else None
 
     def _row_to_dict(self, row: sqlite3.Row) -> dict[str, Any]:
         """Convert a SQLite row to a dictionary."""
