@@ -274,7 +274,7 @@ class DetectionEngine:
     def _eval_brute_force(self, rule: DetectionRuleConfig, finding: Finding) -> list[DetectionAlert]:
         """
         Detect brute force login attempts.
-        Logic: More than N failed login attempts within a time window from same source IP.
+        Logic: At least N failed login attempts within a time window from same source IP.
         """
         params = rule.parameters
         threshold = params.get("threshold", 5)
@@ -297,25 +297,42 @@ class DetectionEngine:
             logger.debug("Detection: rule '%s' — missing group_by field '%s'", rule.name, group_by)
             return []
 
-        # Add event to sliding window
-        state = self._rule_states[rule.name]
         event_ts = finding.timestamp.timestamp()
-        state.add_event(group_key, event_ts, {
+        event_payload = {
             "srcip": finding.srcip,
             "host": finding.host,
             "title": finding.title,
             "timestamp": finding.timestamp.isoformat(),
             "user": self._resolve_field(finding, "data.dstuser") or self._resolve_field(finding, "data.srcuser") or "",
-        })
+        }
+
+        window_seconds = params.get("window_seconds", 60)
+        window_start = event_ts - window_seconds
+
+        if self._alert_store and hasattr(self._alert_store, "save_rule_event"):
+            self._alert_store.save_rule_event(
+                rule_name=rule.name,
+                rule_type=rule.type,
+                group_key=group_key,
+                event_epoch=event_ts,
+                finding=finding,
+                event_data=event_payload,
+            )
+            count = self._alert_store.count_rule_events(rule.name, group_key, window_start, event_ts)
+            events_in_window = self._alert_store.get_rule_events(rule.name, group_key, window_start, event_ts, limit=10)
+        else:
+            state = self._rule_states[rule.name]
+            state.add_event(group_key, event_ts, event_payload)
+            count = state.count(group_key, event_ts)
+            events_in_window = [ev for _, ev in state.get_events(group_key, event_ts)[-10:]]
 
         # Check threshold
-        count = state.count(group_key, event_ts)
         logger.debug(
             "Detection: rule '%s' state for key '%s': %d events in window",
             rule.name, group_key, count,
         )
 
-        if count > threshold:
+        if count >= threshold:
             # Check cooldown
             if self._cooldowns.is_cooled_down(rule.name, group_key, rule.cooldown_seconds):
                 remaining = self._cooldowns.remaining_seconds(rule.name, group_key, rule.cooldown_seconds)
@@ -326,21 +343,20 @@ class DetectionEngine:
                 return []
 
             self._cooldowns.record_trigger(rule.name, group_key)
-            events_in_window = state.get_events(group_key, event_ts)
 
             alert = DetectionAlert(
                 id=str(uuid4()),
                 rule_name=rule.name,
                 rule_type=rule.type,
                 severity=rule.severity,
-                description=f"Brute force detected: {count} failed login attempts from {group_key} within {params.get('window_seconds', 60)}s (threshold: {threshold})",
+                description=f"Brute force detected: {count} failed login attempts from {group_key} within {window_seconds}s (threshold: {threshold})",
                 evidence={
                     "source_ip": group_key,
                     "attempt_count": count,
                     "threshold": threshold,
-                    "window_seconds": params.get("window_seconds", 60),
+                    "window_seconds": window_seconds,
                 },
-                source_events=[ev for _, ev in events_in_window[-10:]],  # Last 10
+                source_events=events_in_window,
                 triggered_at=datetime.now(timezone.utc).isoformat(),
                 create_ticket=rule.create_ticket,
             )

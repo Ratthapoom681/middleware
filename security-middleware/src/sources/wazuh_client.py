@@ -29,6 +29,13 @@ WAZUH_LEVEL_MAP: list[tuple[int, Severity]] = [
     (0, Severity.INFO),
 ]
 
+FAILED_LOGIN_GROUPS = {
+    "authentication_failed",
+    "authentication_failures",
+    "authentication_failure",
+    "invalid_login",
+}
+
 
 def _map_wazuh_level(level: int) -> Severity:
     """Map Wazuh alert level (0-15) to unified severity."""
@@ -98,6 +105,8 @@ class WazuhClient:
             rule = alert.get("rule", {})
             agent = alert.get("agent", {})
             data = alert.get("data", {})
+            if isinstance(data, dict) and "status" not in data and self._looks_like_failed_login(rule):
+                data["status"] = "failed"
 
             try:
                 level = int(rule.get("level", 0) or 0)
@@ -170,6 +179,14 @@ class WazuhClient:
         except Exception as e:
             logger.warning("Wazuh: failed to parse alert: %s", e)
             return None
+
+    def _looks_like_failed_login(self, rule: dict[str, Any]) -> bool:
+        """Infer failed-login status from common Wazuh authentication rule metadata."""
+        groups = {str(group).strip().lower() for group in rule.get("groups", []) or []}
+        if groups.intersection(FAILED_LOGIN_GROUPS):
+            return True
+        description = str(rule.get("description", "")).lower()
+        return "failed" in description and "login" in description
 
     def test_connection(self) -> bool:
         """Test connectivity to the Wazuh Manager API."""

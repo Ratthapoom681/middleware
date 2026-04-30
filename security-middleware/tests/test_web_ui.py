@@ -377,7 +377,7 @@ def test_wazuh_webhook_processes_payload_through_pipeline(workspace_tmp_dir, mon
                     "groups": ["authentication_failed"],
                 },
                 "agent": {"name": "web-01", "ip": "10.0.0.10"},
-                "data": {"status": "failed", "srcip": "10.0.0.1"},
+                "data": {"srcip": "10.0.0.1"},
             },
         )
 
@@ -387,6 +387,7 @@ def test_wazuh_webhook_processes_payload_through_pipeline(workspace_tmp_dir, mon
     assert payload["stats"]["ingested"] == 1
     assert captured["findings"][0].source.value == "wazuh"
     assert captured["findings"][0].title == "Failed login"
+    assert captured["findings"][0].raw_data["data"]["status"] == "failed"
     assert captured["event_context"] == {
         "origin": "webhook",
         "alert_count": 1,

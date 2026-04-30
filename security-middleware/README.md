@@ -81,7 +81,7 @@ export REDMINE_API_KEY="your-key"
 ### 3. Run
 
 ```bash
-# Continuous polling mode
+# Continuous mode. DefectDojo is polled; Wazuh alerts arrive through the webhook.
 python -m src.main
 
 # Single cycle (useful for cron)
@@ -99,6 +99,36 @@ python -m src.main --test
 # Custom config path
 python -m src.main -c /path/to/config.yaml
 ```
+
+### 3.1. Wazuh webhook integration
+
+Install the Wazuh-side custom integration script on the Wazuh manager:
+
+```bash
+sudo cp integrations/custom-security-middleware /var/ossec/integrations/custom-security-middleware
+sudo chown root:wazuh /var/ossec/integrations/custom-security-middleware
+sudo chmod 750 /var/ossec/integrations/custom-security-middleware
+```
+
+Then add an integration block in `/var/ossec/etc/ossec.conf`:
+
+```xml
+<integration>
+  <name>custom-security-middleware</name>
+  <hook_url>http://MIDDLEWARE_HOST:5000/api/webhook/wazuh</hook_url>
+  <level>0</level>
+  <group>authentication_failed,authentication_failures,authentication_failure,invalid_login,sshd</group>
+  <alert_format>json</alert_format>
+</integration>
+```
+
+Restart Wazuh after editing `ossec.conf`:
+
+```bash
+sudo systemctl restart wazuh-manager
+```
+
+See [docs/wazuh-integration.md](docs/wazuh-integration.md) for the full setup notes.
 
 ### 4. Docker
 

@@ -34,6 +34,29 @@ CREATE TABLE IF NOT EXISTS detection_alerts (
 CREATE INDEX IF NOT EXISTS idx_detection_triggered_at ON detection_alerts(triggered_at);
 CREATE INDEX IF NOT EXISTS idx_detection_severity ON detection_alerts(severity);
 CREATE INDEX IF NOT EXISTS idx_detection_rule_type ON detection_alerts(rule_type);
+
+CREATE TABLE IF NOT EXISTS detection_events (
+    id TEXT PRIMARY KEY,
+    rule_name TEXT NOT NULL,
+    rule_type TEXT NOT NULL,
+    group_key TEXT NOT NULL,
+    source TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    event_epoch REAL NOT NULL,
+    event_data TEXT NOT NULL DEFAULT '{}',
+    created_epoch REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_detection_events_rule_group_epoch
+    ON detection_events(rule_name, group_key, event_epoch);
+
+CREATE TABLE IF NOT EXISTS wazuh_events (
+    id TEXT PRIMARY KEY,
+    source_id TEXT NOT NULL,
+    event_epoch REAL NOT NULL,
+    finding_json TEXT NOT NULL DEFAULT '{}',
+    created_epoch REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_wazuh_events_event_epoch ON wazuh_events(event_epoch);
 """
 
 
@@ -90,6 +113,128 @@ class DetectionAlertStore:
             "Detection: alert persisted — rule='%s' severity=%s id=%s",
             alert.rule_name, alert.severity, alert.id,
         )
+
+    def save_rule_event(
+        self,
+        *,
+        rule_name: str,
+        rule_type: str,
+        group_key: str,
+        event_epoch: float,
+        finding: Any,
+        event_data: dict[str, Any],
+    ) -> None:
+        """Persist a source event that contributed to a detection rule window."""
+        if not self._conn:
+            return
+
+        source = getattr(getattr(finding, "source", None), "value", str(getattr(finding, "source", "")))
+        source_id = str(getattr(finding, "source_id", ""))
+        event_id = f"{rule_name}:{source}:{source_id}"
+        self._conn.execute(
+            """
+            INSERT OR IGNORE INTO detection_events
+            (id, rule_name, rule_type, group_key, source, source_id, event_epoch, event_data, created_epoch)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                event_id,
+                rule_name,
+                rule_type,
+                group_key,
+                source,
+                source_id,
+                float(event_epoch),
+                json.dumps(event_data, default=str),
+                time.time(),
+            ),
+        )
+        self._conn.commit()
+
+    def save_wazuh_event(self, finding: Any) -> None:
+        """Persist the raw normalized Wazuh alert received from the webhook."""
+        if not self._conn:
+            return
+
+        source_id = str(getattr(finding, "source_id", ""))
+        event_id = f"wazuh:{source_id}"
+        event_epoch = float(getattr(finding, "timestamp").timestamp())
+        payload = finding.to_dict() if hasattr(finding, "to_dict") else {}
+        self._conn.execute(
+            """
+            INSERT OR IGNORE INTO wazuh_events
+            (id, source_id, event_epoch, finding_json, created_epoch)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                event_id,
+                source_id,
+                event_epoch,
+                json.dumps(payload, default=str),
+                time.time(),
+            ),
+        )
+        self._conn.commit()
+
+    def count_wazuh_events(self) -> int:
+        """Count stored raw Wazuh webhook events."""
+        if not self._conn:
+            return 0
+
+        cursor = self._conn.execute("SELECT COUNT(*) FROM wazuh_events")
+        return int(cursor.fetchone()[0])
+
+    def count_rule_events(self, rule_name: str, group_key: str, start_epoch: float, end_epoch: float) -> int:
+        """Count source events for a rule/group inside a time window."""
+        if not self._conn:
+            return 0
+
+        cursor = self._conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM detection_events
+            WHERE rule_name = ?
+              AND group_key = ?
+              AND event_epoch >= ?
+              AND event_epoch <= ?
+            """,
+            (rule_name, group_key, float(start_epoch), float(end_epoch)),
+        )
+        return int(cursor.fetchone()[0])
+
+    def get_rule_events(
+        self,
+        rule_name: str,
+        group_key: str,
+        start_epoch: float,
+        end_epoch: float,
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        """Return source event payloads for a rule/group inside a time window."""
+        if not self._conn:
+            return []
+
+        cursor = self._conn.execute(
+            """
+            SELECT event_data
+            FROM detection_events
+            WHERE rule_name = ?
+              AND group_key = ?
+              AND event_epoch >= ?
+              AND event_epoch <= ?
+            ORDER BY event_epoch DESC
+            LIMIT ?
+            """,
+            (rule_name, group_key, float(start_epoch), float(end_epoch), int(limit)),
+        )
+        events: list[dict[str, Any]] = []
+        for row in cursor.fetchall():
+            try:
+                events.append(json.loads(row["event_data"]))
+            except (json.JSONDecodeError, TypeError):
+                events.append({})
+        events.reverse()
+        return events
 
     def get_alerts(
         self,
@@ -220,10 +365,18 @@ class DetectionAlertStore:
             "DELETE FROM detection_alerts WHERE created_epoch < ?",
             (cutoff,),
         )
+        event_cursor = self._conn.execute(
+            "DELETE FROM detection_events WHERE created_epoch < ?",
+            (cutoff,),
+        )
+        wazuh_cursor = self._conn.execute(
+            "DELETE FROM wazuh_events WHERE created_epoch < ?",
+            (cutoff,),
+        )
         self._conn.commit()
-        count = cursor.rowcount
+        count = cursor.rowcount + event_cursor.rowcount + wazuh_cursor.rowcount
         if count > 0:
-            logger.info("Detection: cleaned up %d expired alerts", count)
+            logger.info("Detection: cleaned up %d expired alerts/events", count)
         return count
 
     def _row_to_dict(self, row: sqlite3.Row) -> dict[str, Any]:

@@ -78,28 +78,29 @@ def engine(config, memory_store):
 
 
 def test_brute_force_detection(engine, memory_store):
-    base_finding = Finding(
-        source=FindingSource.WAZUH,
-        source_id="1",
-        title="Failed login",
-        description="Test login",
-        severity=Severity.LOW,
-        timestamp=datetime.now(timezone.utc),
-        srcip="10.0.0.1",
-        raw_data={"data": {"status": "failed", "dstuser": "admin"}}
-    )
+    def failed_login(source_id: str) -> Finding:
+        return Finding(
+            source=FindingSource.WAZUH,
+            source_id=source_id,
+            title="Failed login",
+            description="Test login",
+            severity=Severity.LOW,
+            timestamp=datetime.now(timezone.utc),
+            srcip="10.0.0.1",
+            raw_data={"data": {"status": "failed", "dstuser": "admin"}}
+        )
     
-    # 3 failures -> threshold is 3, so not triggered yet
-    findings = [base_finding] * 3
+    # 2 failures -> threshold is 3, so not triggered yet
+    findings = [failed_login("1"), failed_login("2")]
     alerts = engine.evaluate(findings)
     assert len(alerts) == 0
     
-    # 4th failure -> triggers
-    alerts = engine.evaluate([base_finding])
+    # 3rd failure -> triggers
+    alerts = engine.evaluate([failed_login("3")])
     assert len(alerts) == 1
     assert alerts[0].rule_type == "brute_force"
     assert alerts[0].evidence["source_ip"] == "10.0.0.1"
-    assert alerts[0].evidence["attempt_count"] == 4
+    assert alerts[0].evidence["attempt_count"] == 3
     
     stored = memory_store.get_alerts()
     assert len(stored) == 1

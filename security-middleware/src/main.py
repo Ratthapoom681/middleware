@@ -27,15 +27,16 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.config import load_config, AppConfig
-from src.models.finding import Finding
+from src.models.finding import Finding, FindingSource, Severity
 from src.sources.wazuh_client import WazuhClient
 from src.sources.defectdojo_client import DefectDojoClient
 from src.pipeline.filter import FilterStage
 from src.pipeline.severity_mapper import SeverityMapperStage
 from src.pipeline.deduplicator import DeduplicatorStage
 from src.pipeline.enricher import EnricherStage
-from src.pipeline.detection_engine import DetectionEngine
+from src.pipeline.detection_engine import DetectionAlert, DetectionEngine
 from src.pipeline.detection_store import DetectionAlertStore
+from src.pipeline.identity import hydrate_identity
 from src.output.redmine_client import RedmineClient
 from src.state_store import create_state_store
 
@@ -299,18 +300,49 @@ class MiddlewarePipeline:
         total_ingested = len(findings)
         logger.info("Processing batch: %d findings", total_ingested)
 
+        if self._suppress_raw_wazuh_ticketing(event_context):
+            self._persist_raw_wazuh_events(findings)
+
         # --- Detection Engine (evaluate before filtering) ---
+        detection_ticket_findings: list[Finding] = []
         if self.detection_engine.enabled:
             logger.info("--- Detection Engine ---")
             try:
                 detection_alerts = self.detection_engine.evaluate(findings)
                 if detection_alerts:
                     logger.info("Detection engine generated %d alert(s)", len(detection_alerts))
+                    detection_ticket_findings = [
+                        self._detection_alert_to_finding(alert)
+                        for alert in detection_alerts
+                        if alert.create_ticket
+                    ]
+                    if detection_ticket_findings:
+                        findings.extend(detection_ticket_findings)
+                        logger.info(
+                            "Detection engine queued %d generated alert finding(s) for ticketing",
+                            len(detection_ticket_findings),
+                        )
             except Exception as exc:
                 logger.error("Detection engine evaluation failed: %s", exc)
 
+        raw_wazuh_suppressed = 0
+        if self._suppress_raw_wazuh_ticketing(event_context):
+            ticketable_findings = [f for f in findings if not self._is_raw_wazuh_finding(f)]
+            raw_wazuh_suppressed = len(findings) - len(ticketable_findings)
+            if raw_wazuh_suppressed:
+                for finding in findings:
+                    if self._is_raw_wazuh_finding(finding):
+                        finding.filtered = True
+                        finding.dedup_reason = "Stored for detection only"
+                logger.info(
+                    "Wazuh webhook mode: stored/evaluated %d raw Wazuh finding(s); only detection alerts can ticket",
+                    raw_wazuh_suppressed,
+                )
+            findings = ticketable_findings
+
         # --- 2. Filter ---
         logger.info("--- Filtering ---")
+        total_filter_candidates = len(findings) + raw_wazuh_suppressed
         findings = self.filter_stage.process(findings)
         after_filter = len(findings)
 
@@ -386,7 +418,7 @@ class MiddlewarePipeline:
         logger.info("=" * 60)
 
         results = []
-        for f in original_findings:
+        for f in [*original_findings, *detection_ticket_findings]:
             # Force evaluation of tracing metadata even if finding was filtered
             self.redmine._evaluate_routing(f)
             
@@ -411,7 +443,7 @@ class MiddlewarePipeline:
         outcome = {
             "stats": {
                 "ingested": total_ingested,
-                "filtered": total_ingested - after_filter,
+                "filtered": total_filter_candidates - after_filter,
                 "deduplicated": len(repeat_findings),
                 "created": stats.get("created", 0),
                 "updated": stats.get("updated", 0),
@@ -423,6 +455,78 @@ class MiddlewarePipeline:
             "results": results
         }
         return outcome
+
+    def _suppress_raw_wazuh_ticketing(self, event_context: dict[str, Any] | None) -> bool:
+        """Return true when Wazuh webhook events should be stored/evaluated but not ticketed raw."""
+        origin = str((event_context or {}).get("origin", "")).lower()
+        return origin in {"webhook", "ingest-queue"}
+
+    def _persist_raw_wazuh_events(self, findings: list[Finding]) -> None:
+        """Store raw Wazuh webhook findings for detection/audit before any ticketing decision."""
+        if not self.detection_store or not hasattr(self.detection_store, "save_wazuh_event"):
+            return
+
+        stored = 0
+        for finding in findings:
+            if self._is_raw_wazuh_finding(finding):
+                try:
+                    self.detection_store.save_wazuh_event(finding)
+                    stored += 1
+                except Exception as exc:
+                    logger.error("Detection: failed to persist raw Wazuh event %s: %s", finding.source_id, exc)
+        if stored:
+            logger.info("Detection: persisted %d raw Wazuh webhook event(s)", stored)
+
+    def _is_raw_wazuh_finding(self, finding: Finding) -> bool:
+        """Raw Wazuh findings are rule input; detection-generated Wazuh findings may ticket."""
+        if finding.source != FindingSource.WAZUH:
+            return False
+        if str(finding.source_id).startswith("detection:"):
+            return False
+        if "detection" in {str(group).lower() for group in finding.rule_groups}:
+            return False
+        if isinstance(finding.raw_data, dict) and "detection_alert" in finding.raw_data:
+            return False
+        return True
+
+    def _detection_alert_to_finding(self, alert: DetectionAlert) -> Finding:
+        """Convert a ticketable detection alert into a normal pipeline finding."""
+        severity = Severity.from_string(alert.severity)
+        raw_severity_by_value = {
+            "critical": "15",
+            "high": "12",
+            "medium": "7",
+            "low": "4",
+            "info": "0",
+        }
+        source_ip = str(alert.evidence.get("source_ip") or alert.evidence.get("srcip") or "")
+        host = source_ip or str(alert.evidence.get("user") or alert.rule_type or "detection")
+
+        try:
+            timestamp = datetime.fromisoformat(str(alert.triggered_at).replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            timestamp = datetime.now(timezone.utc)
+
+        finding = Finding(
+            source=FindingSource.WAZUH,
+            source_id=f"detection:{alert.id}",
+            title=f"{alert.rule_name}: {alert.rule_type}",
+            description=alert.description,
+            severity=severity,
+            raw_severity=raw_severity_by_value.get(severity.value, "0"),
+            host=host,
+            srcip=source_ip,
+            timestamp=timestamp,
+            rule_id=f"detection:{alert.rule_type}",
+            rule_groups=["detection", alert.rule_type],
+            raw_data={"detection_alert": alert.to_dict()},
+            enrichment={
+                "detection_alert_id": alert.id,
+                "detection_rule": alert.rule_name,
+                "detection_rule_type": alert.rule_type,
+            },
+        )
+        return hydrate_identity(finding)
 
     def _async_delivery_enabled(self) -> bool:
         """Return whether async Redmine delivery can be used safely."""

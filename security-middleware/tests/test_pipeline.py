@@ -16,6 +16,8 @@ from src.config import (
     FilterConfig,
     DedupConfig,
     DeliveryConfig,
+    DetectionConfig,
+    DetectionRuleConfig,
     EnrichmentConfig,
 )
 from src.main import MiddlewarePipeline
@@ -229,6 +231,182 @@ def test_process_batch_queues_findings_when_async_delivery_enabled(config):
     assert pipeline.state_store.jobs[0]["action"] == "create_ticket"
     assert pipeline.state_store.jobs[0]["dedup_hash"] == finding.dedup_hash
     assert pipeline.state_store.ticket_states[0][1]["last_delivery_status"] == "queued"
+
+    pipeline.close()
+
+
+@responses.activate
+def test_detection_alert_ticket_created_while_raw_wazuh_failures_are_filtered(config, workspace_tmp_dir):
+    config.defectdojo.enabled = False
+    config.pipeline.filter = FilterConfig(
+        min_severity="info",
+        default_action="keep",
+        json_rules=[
+            {
+                "name": "drop-raw-wazuh-failed-logins",
+                "enabled": True,
+                "source": "wazuh",
+                "action": "drop",
+                "match": "any",
+                "conditions": [
+                    {"path": "data.status", "op": "equals", "value": "failed"},
+                    {"path": "rule.groups", "op": "contains", "value": "authentication_failed"},
+                ],
+            }
+        ],
+    )
+    config.pipeline.dedup = DedupConfig(
+        enabled=True,
+        db_path=str(workspace_tmp_dir / "detection_ticket_dedup.db"),
+        ttl_hours=1,
+    )
+    config.pipeline.detection = DetectionConfig(
+        enabled=True,
+        db_path=str(workspace_tmp_dir / "detection_alerts.db"),
+        rules=[
+            DetectionRuleConfig(
+                name="Brute Force Login Detection",
+                type="brute_force",
+                enabled=True,
+                severity="high",
+                cooldown_seconds=0,
+                create_ticket=True,
+                parameters={
+                    "threshold": 5,
+                    "window_seconds": 300,
+                    "event_type_field": "data.status",
+                    "event_type_value": "failed",
+                    "group_by": "srcip",
+                },
+            )
+        ],
+    )
+
+    responses.add(
+        responses.POST,
+        "http://redmine-test/issues.json",
+        json={"issue": {"id": 501}},
+        status=201,
+    )
+
+    findings = [
+        hydrate_identity(
+            Finding(
+                source=FindingSource.WAZUH,
+                source_id=f"failed-login-{idx}",
+                title="Failed login",
+                description="Failed login detected",
+                severity=Severity.MEDIUM,
+                raw_severity="7",
+                host="web-server-01",
+                srcip="10.0.0.50",
+                rule_id="5710",
+                rule_groups=["authentication_failed"],
+                raw_data={
+                    "rule": {
+                        "id": "5710",
+                        "level": 7,
+                        "description": "Failed login",
+                        "groups": ["authentication_failed"],
+                    },
+                    "agent": {"name": "web-server-01"},
+                    "data": {"status": "failed", "srcip": "10.0.0.50"},
+                },
+            )
+        )
+        for idx in range(5)
+    ]
+
+    pipeline = MiddlewarePipeline(config)
+    outcome = pipeline.process_batch(findings, event_context={"origin": "webhook"})
+
+    assert outcome["stats"]["ingested"] == 5
+    assert outcome["stats"]["filtered"] == 5
+    assert outcome["stats"]["created"] == 1
+    assert len(responses.calls) == 1
+    created_payload = responses.calls[0].request.body.decode("utf-8")
+    assert "Brute Force Login Detection: brute_force" in created_payload
+    assert "Failed login" in created_payload
+
+    stored_alerts = pipeline.detection_store.get_alerts(rule_type="brute_force")
+    assert len(stored_alerts) == 1
+    assert stored_alerts[0]["evidence"]["attempt_count"] == 5
+    assert pipeline.detection_store.count_wazuh_events() == 5
+    assert pipeline.detection_store.count_rule_events(
+        "Brute Force Login Detection",
+        "10.0.0.50",
+        findings[0].timestamp.timestamp() - 300,
+        findings[-1].timestamp.timestamp(),
+    ) == 5
+
+    pipeline.close()
+
+
+@responses.activate
+def test_wazuh_webhook_raw_alert_is_stored_but_not_ticketed_before_rule_match(config, workspace_tmp_dir):
+    config.defectdojo.enabled = False
+    config.pipeline.filter = FilterConfig(min_severity="info", default_action="keep")
+    config.pipeline.dedup = DedupConfig(
+        enabled=True,
+        db_path=str(workspace_tmp_dir / "raw_wazuh_no_ticket_dedup.db"),
+        ttl_hours=1,
+    )
+    config.pipeline.detection = DetectionConfig(
+        enabled=True,
+        db_path=str(workspace_tmp_dir / "raw_wazuh_detection.db"),
+        rules=[
+            DetectionRuleConfig(
+                name="Brute Force Login Detection",
+                type="brute_force",
+                enabled=True,
+                severity="high",
+                cooldown_seconds=0,
+                create_ticket=True,
+                parameters={
+                    "threshold": 5,
+                    "window_seconds": 300,
+                    "event_type_field": "data.status",
+                    "event_type_value": "failed",
+                    "group_by": "srcip",
+                },
+            )
+        ],
+    )
+
+    finding = hydrate_identity(
+        Finding(
+            source=FindingSource.WAZUH,
+            source_id="failed-login-single",
+            title="Failed login",
+            description="Failed login detected",
+            severity=Severity.MEDIUM,
+            raw_severity="7",
+            host="web-server-01",
+            srcip="10.0.0.60",
+            rule_id="5710",
+            rule_groups=["authentication_failed"],
+            raw_data={
+                "rule": {
+                    "id": "5710",
+                    "level": 7,
+                    "description": "Failed login",
+                    "groups": ["authentication_failed"],
+                },
+                "data": {"status": "failed", "srcip": "10.0.0.60"},
+            },
+        )
+    )
+
+    pipeline = MiddlewarePipeline(config)
+    outcome = pipeline.process_batch([finding], event_context={"origin": "webhook"})
+
+    assert outcome["stats"]["ingested"] == 1
+    assert outcome["stats"]["filtered"] == 1
+    assert outcome["stats"]["created"] == 0
+    assert outcome["stats"]["failed"] == 0
+    assert len(responses.calls) == 0
+    assert pipeline.detection_store.count_wazuh_events() == 1
+    assert pipeline.detection_store.get_alerts(rule_type="brute_force") == []
 
     pipeline.close()
 

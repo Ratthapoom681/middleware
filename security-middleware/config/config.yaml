@@ -66,7 +66,7 @@ pipeline:
     max_state_entries: 10000
     rules:
     - cooldown_seconds: 300
-      create_ticket: false
+      create_ticket: true
       enabled: true
       name: Brute Force Login Detection
       parameters:
@@ -127,11 +127,26 @@ pipeline:
     json_rules:
     - action: drop
       conditions:
+      - op: exists
+        path: detection_alert
+        value: false
+      enabled: true
+      match: all
+      name: drop-raw-wazuh-events
+      source: wazuh
+    - action: drop
+      conditions:
       - op: equals
         path: data.status
         value: failed
+      - op: contains
+        path: rule.groups
+        value: authentication_failed
+      - op: regex
+        path: rule.description
+        value: failed.*login|login.*failed
       enabled: true
-      match: all
+      match: any
       name: drop-raw-wazuh-failed-logins
       source: wazuh
     min_severity: low

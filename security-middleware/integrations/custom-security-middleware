@@ -1,0 +1,113 @@
+#!/usr/bin/env python3
+"""
+Wazuh custom integration that forwards alert JSON to Security Middleware.
+
+Wazuh calls custom integration scripts with:
+  argv[1] = alert JSON file path
+  argv[2] = api_key from ossec.conf, or an empty value
+  argv[3] = hook_url from ossec.conf
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import sys
+import urllib.error
+import urllib.request
+
+
+DEFAULT_TIMEOUT_SECONDS = 10
+LOG_PATH = os.environ.get("MIDDLEWARE_INTEGRATION_LOG", "/var/ossec/logs/integrations.log")
+
+
+def configure_logging() -> None:
+    formatter = logging.Formatter("%(asctime)s %(levelname)s custom-security-middleware: %(message)s")
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+
+    try:
+        handler: logging.Handler = logging.FileHandler(LOG_PATH)
+    except OSError:
+        handler = logging.StreamHandler(sys.stderr)
+
+    handler.setFormatter(formatter)
+    logger.handlers.clear()
+    logger.addHandler(handler)
+
+
+def normalize_api_key(raw_value: str) -> str:
+    value = (raw_value or "").strip()
+    if not value:
+        return ""
+
+    prefix, separator, suffix = value.partition(":")
+    if separator and prefix.lower() in {"api_key", "apikey"}:
+        return suffix.strip()
+    return value
+
+
+def load_alert(alert_file_path: str) -> object:
+    with open(alert_file_path, "r", encoding="utf-8") as alert_file:
+        return json.load(alert_file)
+
+
+def post_alert(hook_url: str, api_key: str, alert: object) -> int:
+    timeout = int(os.environ.get("MIDDLEWARE_WEBHOOK_TIMEOUT", str(DEFAULT_TIMEOUT_SECONDS)))
+    payload = json.dumps(alert, separators=(",", ":")).encode("utf-8")
+
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "wazuh-custom-security-middleware/1.0",
+    }
+    normalized_key = normalize_api_key(api_key)
+    if normalized_key:
+        headers["X-API-Key"] = normalized_key
+
+    request = urllib.request.Request(hook_url, data=payload, headers=headers, method="POST")
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return int(response.status)
+
+
+def main(argv: list[str]) -> int:
+    configure_logging()
+
+    if len(argv) < 4:
+        logging.error("expected arguments: <alert_file> <api_key> <hook_url>")
+        return 1
+
+    alert_file_path = argv[1]
+    api_key = argv[2]
+    hook_url = argv[3]
+
+    if not hook_url:
+        logging.error("missing hook_url")
+        return 1
+
+    try:
+        alert = load_alert(alert_file_path)
+        status = post_alert(hook_url, api_key, alert)
+    except FileNotFoundError:
+        logging.exception("alert file not found: %s", alert_file_path)
+        return 1
+    except json.JSONDecodeError:
+        logging.exception("alert file is not valid JSON: %s", alert_file_path)
+        return 1
+    except urllib.error.HTTPError as exc:
+        logging.error("middleware webhook returned HTTP %s: %s", exc.code, exc.read().decode("utf-8", "replace"))
+        return 1
+    except Exception:
+        logging.exception("failed to forward Wazuh alert to middleware")
+        return 1
+
+    if 200 <= status < 300:
+        logging.info("forwarded Wazuh alert to middleware, status=%s", status)
+        return 0
+
+    logging.error("middleware webhook returned unexpected status=%s", status)
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))
